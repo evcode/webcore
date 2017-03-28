@@ -3,8 +3,14 @@
 #include <sys/socket.h>
 
 // TODO: double check how debug macro impl in tmm projects and some opensource, such as nginx
-#define inform(x...) printf("[INFORM, %s, %d] ", __func__, __LINE__);printf(x);
-#define debug(x...)  printf("[DEBUG, %s, %d] ", __func__, __LINE__);printf(x);
+#define inform(x...) do {\
+						printf("[INFORM] %s,%d: ", __func__, __LINE__);\
+						printf(x);\
+					} while(0)
+#define debug(x...)  do {\
+						printf("[DEBUG] %s,%d: ", __func__, __LINE__);\
+						printf(x);\
+					} while(0)
 
 typedef enum
 {
@@ -80,7 +86,6 @@ struct sockaddr_un {
     char        sun_path[UNIX_PATH_MAX];  // pathname 
 };
 */
-
 int bindsock(Transaction* trans, const char* addr)
 {
 	if ((trans == NULL) || (addr == NULL) || (strlen(addr) == 0))
