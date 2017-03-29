@@ -1,58 +1,5 @@
 #include <stdio.h>
 
-#include <sys/socket.h>
-
-// TODO: double check how debug macro impl in tmm projects and some opensource, such as nginx
-#define inform(x...) do {\
-						printf("[INFORM] %s,%d: ", __func__, __LINE__);\
-						printf(x);\
-					} while(0)
-#define debug(x...)  do {\
-						printf("[DEBUG] %s,%d: ", __func__, __LINE__);\
-						printf(x);\
-					} while(0)
-
-typedef enum
-{
-    TRANS_IP = 0,
-    TRANS_UDP,
-    TRANS_TCP	
-} TRANS_TYPE;
-
-typedef struct trans_struct
-{
-	TRANS_TYPE trans_type;
-	int trans_fd;
-} Transaction;
-
-
-
-/*
-int socket(int domain, int type, int protol)
-*/
-int opensock(TRANS_TYPE type, Transaction* trans)
-{
-	int domain, socktype, proto;
-
-	domain = AF_INET; // TODO: now only IPv4 domain supported
-	socktype = (type == TRANS_TCP)?SOCK_STREAM:SOCK_DGRAM;
-	proto  = 0; // TODO: how to match in kernel
-	debug("Creation of domain=%d, socktype=%d, proto=%d\n", domain, socktype, proto);
-
-	int fd = socket(domain, socktype, proto);
-	if (fd < 0)
-	{
-		return -2;
-	}
-	debug("Open the trans fd <%d>\n", fd);
-
-	memset(trans, 0, sizeof(Transaction));
-	trans->trans_type = type;
-	trans->trans_fd   = fd;
-
-	return 0;
-}
-
 #include <netinet/in.h> // 'addr' struct
 /* const struct sockaddr *指针，指向要绑定给sockfd的协议地址。
 这个地址结构根据地址创建socket时的地址协议族的不同而不同:
@@ -86,16 +33,94 @@ struct sockaddr_un {
     char        sun_path[UNIX_PATH_MAX];  // pathname 
 };
 */
+#include <sys/types.h>
+#include <sys/socket.h>
+
+// TODO: double check how debug macro impl in tmm projects and some opensource, such as nginx
+#define error(x...) do {\
+						printf("[ERROR] %s,%d: ", __func__, __LINE__);\
+						printf(x);\
+					 } while(0)
+#define inform(x...)  do {\
+						printf("[INFORM] %s,%d: ", __func__, __LINE__);\
+						printf(x);\
+					 } while(0)
+#define debug(x...)  do {\
+						printf("[DEBUG] %s,%d: ", __func__, __LINE__);\
+						printf(x);\
+					 } while(0)
+
+typedef enum
+{
+    TRANS_IP = 0,
+    TRANS_UDP,
+    TRANS_TCP	
+} TRANS_TYPE;
+
+typedef enum
+{
+	DOMAIN_IPv4 = AF_INET, // TODO: not direclty use AF_*
+	DOMAIN_IPv6 = AF_INET6,
+	DOMAIN_LOCAL= AF_UNIX
+} TRANS_DOMAIN;
+
+typedef struct trans_struct
+{
+	int trans_fd;	
+	TRANS_DOMAIN trans_domain;
+	TRANS_TYPE trans_type;
+	int max_conn;
+} Transaction;
+
+typedef void* TransHandler;
+
+/*
+int socket(int domain, int type, int protol);
+*/
+int opensock(TRANS_TYPE type, Transaction* trans)
+{
+	int domain, socktype, proto;
+
+	domain = AF_INET; // TODO: now only IPv4 domain supported
+	socktype = (type == TRANS_TCP)?SOCK_STREAM:SOCK_DGRAM;
+	proto  = 0; // TODO: CHECK how to match in kernel
+	debug("Creation of domain=%d, socktype=%d, proto=%d\n", domain, socktype, proto);
+
+	int fd = socket(domain, socktype, proto);
+	if (fd < 0)
+	{
+		error("Failed to create socket, err=%d\n", fd);
+		return -2;
+	}
+	debug("--> Open the trans <%d>\n", fd);
+
+	memset(trans, 0, sizeof(Transaction));
+	trans->trans_domain=DOMAIN_IPv4;
+	trans->trans_type = type;
+	trans->max_conn   = 3;
+	trans->trans_fd   = fd;
+
+	return 0;
+}
+
+/*
+int bind(int sockfd, const struct sockaddr *addr,socklen_t *addrlen);
+*/
 int bindsock(Transaction* trans, const char* addr)
 {
+	struct sockaddr_in sockaddr;
+
 	if ((trans == NULL) || (addr == NULL) || (strlen(addr) == 0))
 	{
+		error("Bad parameters\n");
 		return -1;
 	}
 
-	struct sockaddr_in sockaddr;
-	memset(&sockaddr, 0, sizeof(struct sockaddr_in));
-	sockaddr.sin_family = AF_INET;
+	if (trans->trans_domain != DOMAIN_IPv4)
+	{
+		error("Invalid parameters\n");
+		return -1;
+	}
 
     unsigned char ipaddr[4] = {127, 0, 0, 1};
 	unsigned int ipport = 9000;
@@ -110,16 +135,120 @@ int bindsock(Transaction* trans, const char* addr)
 	    	&ipaddr[0], &ipaddr[1], &ipaddr[2], &ipaddr[3], &ipport);
 	    if (nbr != 5)
 	    {
+	    	error("Failed to scan the input IP string\n");
 	    	return -2;
 	    }
 	    debug("Input ip addr=%d.%d.%d.%d:%d\n",
 	    	ipaddr[0], ipaddr[1], ipaddr[2], ipaddr[3], ipport);
 	}
 
-	debug("    --> test INADDR_ANY=%d\n", INADDR_ANY);
-	sockaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+	memset(&sockaddr, 0, sizeof(struct sockaddr_in));
+	sockaddr.sin_family = AF_INET;
+	debug("test INADDR_ANY=%d, sockaddr len=%d\n", INADDR_ANY, sizeof(struct sockaddr_in));
+	sockaddr.sin_addr.s_addr = htonl(INADDR_ANY); // TODO: change to ipaddr
 	sockaddr.sin_port = htons(ipport);
-	debug("Bind the IP %d:%d\n", sockaddr.sin_addr.s_addr, sockaddr.sin_port);
+	debug("  the sockaddr %d:%d\n", sockaddr.sin_addr.s_addr, sockaddr.sin_port);
+
+	int err = bind(trans->trans_fd, &sockaddr, sizeof(struct sockaddr_in));
+	if (err < 0)
+	{
+		error("Failed to bind, err=%d\n", err);
+		return -2;
+	}
+	debug("--> Succeed to bind\n");
+
+	return 0;
+}
+
+/*
+int listen(int sockfd, int backlog);
+*/
+int listensock(Transaction* trans)
+{
+	int err = listen(trans->trans_fd, trans->max_conn);
+	if (err < 0)
+	{
+		error("Failed to listen, err=%d\n", err);
+		return -2;
+	}
+	debug("--> Succeed to listen\n");
+
+	return 0;
+}
+
+/*
+int accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen);
+*/
+int accpetsock(Transaction* trans)
+{
+	// TODO: domain/AP_* comares with 'sockaddr' to judge
+	struct sockaddr_in sockaddr;
+
+	// accept(trans->trans_fd, NULL, NULL); // TODO: what are last 2 params???
+	int err = accept(trans->trans_fd, &sockaddr, sizeof(struct sockaddr_in));
+	if (err < 0)
+	{
+		error("Failed to accept, err=%d\n", err);
+		return -2;
+	}
+	debug("--> Succeed to accept\n");
+
+	return 0;
+}
+
+/*
+int connect(int sockfd, const struct sockaddr *addr,socklen_t *addrlen);
+*/
+int connectsock(Transaction* trans, const char* addr)
+{
+	struct sockaddr_in sockaddr;
+
+	if ((trans == NULL) || (addr == NULL) || (strlen(addr) == 0))
+	{
+		error("Bad parameters\n");
+		return -1;
+	}
+
+	if (trans->trans_domain != DOMAIN_IPv4)
+	{
+		error("Invalid parameters\n");
+		return -1;
+	}
+
+    unsigned char ipaddr[4] = {127, 0, 0, 1};
+	unsigned int ipport = 9000;
+
+	if (strcmp(addr, "local") == 0)
+	{
+		// as 127.0.0.1
+	}
+	else
+	{
+	    int nbr = sscanf(addr, "%d.%d.%d.%d:%d", 
+	    	&ipaddr[0], &ipaddr[1], &ipaddr[2], &ipaddr[3], &ipport);
+	    if (nbr != 5)
+	    {
+	    	error("Failed to scan the input IP string\n");
+	    	return -2;
+	    }
+	    debug("Input ip addr=%d.%d.%d.%d:%d\n",
+	    	ipaddr[0], ipaddr[1], ipaddr[2], ipaddr[3], ipport);
+	}
+
+	memset(&sockaddr, 0, sizeof(struct sockaddr_in));
+	sockaddr.sin_family = AF_INET;
+	debug("test INADDR_ANY=%d, sockaddr len=%d\n", INADDR_ANY, sizeof(struct sockaddr_in));
+	sockaddr.sin_addr.s_addr = htonl(INADDR_ANY); // TODO: change to ipaddr
+	sockaddr.sin_port = htons(ipport);
+	debug("  sockaddr %d:%d\n", sockaddr.sin_addr.s_addr, sockaddr.sin_port);
+
+	int err = connect(trans->trans_fd, &sockaddr, sizeof(struct sockaddr_in));
+	if (err < 0)
+	{
+		error("Failed to connect, err=%d\n", err);
+		return -2;
+	}
+	debug("--> Succeed to connect\n");
 
 	return 0;
 }
@@ -128,8 +257,19 @@ int main (int argc, char* argv[])
 {
 	Transaction trans;
 
+	inform("argc=%d, argv[0]=%s\n", argc, argv[0]);
+
 	opensock(TRANS_TCP, &trans);
-	bindsock(&trans, "192.168.1.1:33");
+	if (argc > 1)
+	{
+		connectsock(&trans, "local"); // 192.168.1.1:33
+	}
+	else // server mode
+	{
+		bindsock(&trans, "local");
+		listensock(&trans);
+		accpetsock(&trans);
+	}
 
     return 0;
 }
