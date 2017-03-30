@@ -34,6 +34,8 @@ struct sockaddr_un {
 };
 */
 
+#include <arpa/inet.h> // dedicate to inet_ntoa();otherwise, crash!!!
+
 #include <sys/types.h>
 #include <sys/socket.h>
 
@@ -78,37 +80,38 @@ typedef void* TransHandler;
 int format_sockaddr(int type, const char* str, struct sockaddr* s)
 {
 	struct sockaddr_in *addr = (struct sockaddr_in *)s;
-	char ip_str[32];
-	int ip_port;
-
-	memset(addr, 0, sizeof(struct sockaddr_in));
-	addr->sin_family = AF_INET; // TODO: only IPv4 now
-	addr->sin_port   = 9000; // TODO: as default
+	int ip_addr, ip_port;
 
 	if (strcmp(str, "ANY") == 0)
 	{
-		addr->sin_addr.s_addr = htonl(INADDR_ANY);
+		ip_port = 9000;
+		ip_addr = INADDR_ANY;
 	}
 	else if (strcmp(str, "localhost") == 0)
 	{
-		addr->sin_addr.s_addr = inet_addr("127.0.0.1");
+		ip_port = 9000;
+		ip_addr = inet_addr("127.0.0.1");
 	}
 	else
 	{
-	    int nbr = sscanf(str, "%s:%d", ip_str, &ip_port);
+		char ip_str[32];
+	    int nbr = sscanf(str, "%[0-9,.]:%d", ip_str, &ip_port); // AMAZING sscanf()!!
 	    if (nbr != 2)
 	    {
 	    	error("Failed to format sockaddr by %s\n", str);
 	    	return -2;
 	    }
+	    debug("Get external destination: IP %s, port %d\n", ip_str, ip_port);
 
-		addr->sin_addr.s_addr = inet_addr(ip_str);
-		addr->sin_port        = htons(ip_port);
+		ip_addr = inet_addr(ip_str);
 	}
 
-	// TODO: crash here inet_ntoa(addr->sin_addr). WHY?????????????????
-	//debug("Format sockaddr=%s:%d\n", inet_ntoa(addr->sin_addr), addr->sin_port);
-	debug("Format sockaddr=%d:%d\n", addr->sin_addr, addr->sin_port);
+	memset(addr, 0, sizeof(struct sockaddr_in));
+	addr->sin_family      = AF_INET; // TODO: only IPv4 now
+	addr->sin_addr.s_addr = (ip_addr); // TODO: here cannot htonl();othwerwise,bind() fails. WHY?????
+	addr->sin_port        = (ip_port); // TODO: here htons(), bind() fails also!?
+	debug("sockaddr %s: %u(%x), and port=%d(%x)\n", inet_ntoa(addr->sin_addr),
+		addr->sin_addr.s_addr, addr->sin_addr.s_addr, addr->sin_port, addr->sin_port);
 
 	return 0;
 }
@@ -233,6 +236,7 @@ int accpetsock(Transaction* trans)
 	struct sockaddr_in sockaddr;
 	socklen_t socklen;
 
+	debug("Accepting...\n");
 	// accept(trans->trans_fd, NULL, NULL); // TODO: what are last 2 params???
 	int err = accept(trans->trans_fd, &sockaddr, &socklen);
 	if (err < 0)
@@ -283,15 +287,16 @@ int main (int argc, char* argv[])
 	Transaction trans;
 
 	inform("argc=%d, argv[0]=%s\n", argc, argv[0]);
+	char * dst = "192.168.100.218:3000";//"192.168.100.218:3000" "localhost" "ANY" // TODO: read from cmdline
 
 	opensock(TRANS_TCP, &trans);
 	if (argc > 1)
 	{
-		connectsock(&trans, "localhost"); // TODO: not on local 192.168.1.1:33
+		connectsock(&trans, dst); // TODO: not on local 192.168.1.1:33
 	}
 	else // server mode
 	{
-		bindsock(&trans, "192.168.17.162");
+		bindsock(&trans, dst);
 		listensock(&trans);
 		accpetsock(&trans);
 	}
