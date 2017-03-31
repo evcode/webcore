@@ -1,4 +1,26 @@
 #include <stdio.h>
+#include <errno.h>
+
+// TODO: double check how debug macro impl in tmm projects and some opensource, such as nginx
+#define error(x...) do {\
+						printf("[ERROR] %s,%d: ", __func__, __LINE__);\
+						printf(x);\
+					 } while(0)
+#define inform(x...)  do {\
+						printf("[INFORM] %s,%d: ", __func__, __LINE__);\
+						printf(x);\
+					 } while(0)
+#define debug(x...)  do {\
+						printf("[DEBUG] %s,%d: ", __func__, __LINE__);\
+						printf(x);\
+					 } while(0)
+
+extern int errno;
+
+void say_errno()
+{
+	error("error %d - %s\n", errno, strerror(errno));
+}
 
 #include <netinet/in.h> // 'sockaddr' struct
 /* const struct sockaddr *指针，指向要绑定给sockfd的协议地址。
@@ -39,20 +61,6 @@ struct sockaddr_un {
 #include <sys/types.h>
 #include <sys/socket.h>
 
-// TODO: double check how debug macro impl in tmm projects and some opensource, such as nginx
-#define error(x...) do {\
-						printf("[ERROR] %s,%d: ", __func__, __LINE__);\
-						printf(x);\
-					 } while(0)
-#define inform(x...)  do {\
-						printf("[INFORM] %s,%d: ", __func__, __LINE__);\
-						printf(x);\
-					 } while(0)
-#define debug(x...)  do {\
-						printf("[DEBUG] %s,%d: ", __func__, __LINE__);\
-						printf(x);\
-					 } while(0)
-
 typedef enum
 {
     TRANS_IP = 0,
@@ -80,18 +88,19 @@ typedef void* TransHandler;
 int format_sockaddr(int type, const char* str, struct sockaddr* s)
 {
 	struct sockaddr_in *addr = (struct sockaddr_in *)s;
-	int ip_addr, ip_port;
+	unsigned int   ip_addr;
+	unsigned short ip_port;
 
 	if (strcmp(str, "ANY") == 0)
 	{
 		ip_port = 9000;
 		ip_addr = INADDR_ANY;
 	}
-	else if (strcmp(str, "localhost") == 0)
+	/*else if (strcmp(str, "localhost") == 0) // not necessary - INADDR_ANY is local
 	{
 		ip_port = 9000;
 		ip_addr = inet_addr("127.0.0.1");
-	}
+	}*/
 	else
 	{
 		char ip_str[32];
@@ -101,16 +110,16 @@ int format_sockaddr(int type, const char* str, struct sockaddr* s)
 	    	error("Failed to format sockaddr by %s\n", str);
 	    	return -2;
 	    }
-	    debug("Get external destination: IP %s, port %d\n", ip_str, ip_port);
+	    debug("Get IP str=%s, and port int=%d\n", ip_str, ip_port);
 
 		ip_addr = inet_addr(ip_str);
 	}
 
 	memset(addr, 0, sizeof(struct sockaddr_in));
 	addr->sin_family      = AF_INET; // TODO: only IPv4 now
-	addr->sin_addr.s_addr = (ip_addr); // TODO: here cannot htonl();othwerwise,bind() fails. WHY?????
-	addr->sin_port        = (ip_port); // TODO: here htons(), bind() fails also!?
-	debug("sockaddr %s: %u(%x), and port=%d(%x)\n", inet_ntoa(addr->sin_addr),
+	addr->sin_addr.s_addr = (ip_addr); // TODO: cannot htonl();othwerwise,bind() fails. WHY?????
+	addr->sin_port        = htons(ip_port);
+	debug("inet_ntoa(sockaddr) %s=%u(%#x), and port=%d(%#x)\n", inet_ntoa(addr->sin_addr),
 		addr->sin_addr.s_addr, addr->sin_addr.s_addr, addr->sin_port, addr->sin_port);
 
 	return 0;
@@ -171,15 +180,16 @@ int opensock(TRANS_TYPE type, Transaction* trans)
 	if (fd < 0)
 	{
 		error("Failed to create socket, err=%d\n", fd);
+		say_errno();
 		return -2;
 	}
 	debug("Open the trans <%d>\n", fd);
 
 	memset(trans, 0, sizeof(Transaction));
-	trans->trans_domain=DOMAIN_IPv4;
-	trans->trans_type = type;
-	trans->max_conn   = 3;
-	trans->trans_fd   = fd;
+	trans->trans_domain = DOMAIN_IPv4;
+	trans->trans_type   = type;
+	trans->max_conn     = 3;
+	trans->trans_fd     = fd;
 
 	return 0;
 }
@@ -210,6 +220,7 @@ int bindsock(Transaction* trans, const char* str)
 	if (err < 0)
 	{
 		error("Failed to bind, err=%d\n", err);
+		say_errno();
 		return -2;
 	}
 	debug("Succeed to bind\n");
@@ -223,6 +234,7 @@ int listensock(Transaction* trans)
 	if (err < 0)
 	{
 		error("Failed to listen, err=%d\n", err);
+		say_errno();
 		return -2;
 	}
 	debug("Succeed to listen\n");
@@ -232,19 +244,21 @@ int listensock(Transaction* trans)
 
 int accpetsock(Transaction* trans)
 {
-	// TODO: domain/AP_* comares with 'sockaddr' to judge
+	// TODO: domain/AP_* comares with 'sockaddr' to judge. Now IPv4 ONLY
 	struct sockaddr_in sockaddr;
 	socklen_t socklen;
 
 	debug("Accepting...\n");
-	// accept(trans->trans_fd, NULL, NULL); // TODO: what are last 2 params???
-	int err = accept(trans->trans_fd, &sockaddr, &socklen);
-	if (err < 0)
+	int cli_fd = accept(trans->trans_fd, &sockaddr, &socklen); // TODO: added into Trans
+	if (cli_fd < 0)
 	{
-		error("Failed to accept, err=%d\n", err);
+		error("Failed to accept, err=%d\n", cli_fd);
+		say_errno();
 		return -2;
 	}
-	debug("Succeed to accept\n");
+
+	debug("New comming connection=%d (%s:%d)\n", cli_fd, 
+		inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port));
 
 	return 0;
 }
@@ -275,6 +289,7 @@ int connectsock(Transaction* trans, const char* str)
 	if (err < 0)
 	{
 		error("Failed to connect, err=%d\n", err);
+		say_errno();
 		return -2;
 	}
 	debug("Succeed to connect\n");
@@ -282,12 +297,27 @@ int connectsock(Transaction* trans, const char* str)
 	return 0;
 }
 
+static int system_le()
+{
+	int a = 1;
+
+	/* in HEX,
+	BE is 0000_0001
+	LE is 0100_0000,
+	then return first byte */
+
+	return (*(char*)&a);
+}
+
 int main (int argc, char* argv[])
 {
 	Transaction trans;
 
+	if (system_le())
+		debug("System Little-endian\n");
+
 	inform("argc=%d, argv[0]=%s\n", argc, argv[0]);
-	char * dst = "192.168.100.218:3000";//"192.168.100.218:3000" "localhost" "ANY" // TODO: read from cmdline
+	char * dst = "ANY";//"192.168.100.218:3000" "ANY" // TODO: read from cmdline
 
 	opensock(TRANS_TCP, &trans);
 	if (argc > 1)
