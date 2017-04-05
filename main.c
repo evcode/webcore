@@ -37,7 +37,7 @@ char* curr_timestr()
 	return ctime(&time_sec);
 }
 
-int give_random()
+int give_random(int loop)
 {
 	static char srand_did = 0;
 
@@ -47,7 +47,6 @@ int give_random()
 		srand(time(NULL));
 	}
 
-	int loop = 5; // I need a random from 1 to 5
 	return (1+loop*(rand()/(RAND_MAX+1.0))); // rand() just gives [0, RAND_MAX]
 }
 
@@ -113,6 +112,14 @@ typedef enum
 	DOMAIN_LOCAL= AF_UNIX
 } TRANS_DOMAIN;
 
+typedef struct transconn
+{
+	int conn_fd;
+	struct sockaddr conn_addr; // TODO: now only IPv4
+	socklen_t conn_len;
+	struct transconn* nextconn;
+} TransConn;
+
 typedef struct trans_struct
 {
 	char trans_mode; // server or client
@@ -122,9 +129,11 @@ typedef struct trans_struct
 
 	// Server properties
 	int backlog; // max backlog for listen()
+
 	int max_conn; // allowed connected clients
 	int conn_nbr; // connected clients count
-	struct trans_struct* next_trans; // to maintain a Trans pool
+	TransConn* conn_pool; // to maintain a Trans pool
+	TransConn* conn_end;
 } Transaction;
 
 typedef void* TransHandler;
@@ -304,6 +313,24 @@ int accpetsock(Transaction* trans)
 	debug("New comming connection=%d (%s:%d)\n", cli_fd, 
 		inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port));
 
+	// Add the new client to the connection pool
+	TransConn* conn = (TransConn*)malloc(sizeof(TransConn));
+	memset(conn, 0, sizeof(TransConn));
+	conn->conn_fd = cli_fd;
+	memcpy(&conn->conn_addr, &sockaddr, socklen);
+	conn->conn_len = socklen;
+
+	if (trans->conn_pool == NULL)
+	{
+		trans->conn_pool = conn;
+	}
+	else
+	{
+		trans->conn_end->nextconn = conn;
+	}
+	trans->conn_end = conn;
+	trans->conn_nbr ++;
+
 	return 0;
 }
 
@@ -402,20 +429,22 @@ int main (int argc, char* argv[])
 
 			sprintf(timestr, "Client sock %d from xxx:xx send:", trans.trans_fd);
 			strcat(timestr, curr_timestr());
-			debug("[Client send] %s\n", timestr);
+			debug("[Client send]%s\n", timestr);
 
 			int err = send(trans.trans_fd, timestr, strlen(timestr)+1, 0);// TODO: flags
 			if (err < 0)
 			{
 				error("Failed to send, err=%d\n", err);
+				say_errno();
 				return -3;
 			}
 
-			sleep(give_random());
+			sleep(give_random(5)); // sleep a random sec from 1 to 5
 		}
 	}
 	else // standby for next transaction, and receive the requests...receive
 	{
+		int recv_len;
 		while (1)
 		{
 			int err = accpetsock(&trans);
@@ -424,7 +453,20 @@ int main (int argc, char* argv[])
 				return -3;
 			}
 
-			debug("\n");
+			int pid = fork();
+			if (pid == 0)
+			{
+				// NOTE: "conn_end->conn_fd" is just the new accepted Client
+				int err = recv(trans.conn_end->conn_fd, timestr, sizeof(timestr), 0);// TODO: flags
+				if (err < 0)
+				{
+					error("Failed to receive, err=%d\n", err);
+					say_errno();
+					return -3;
+				}
+
+				inform("[Server receive]%s\n", timestr);
+			}
 		}
 	}
 
