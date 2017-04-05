@@ -1,5 +1,6 @@
+#include <stdlib.h>
 #include <stdio.h>
-#include <errno.h>
+#include <string.h>
 
 // TODO: double check how debug macro impl in tmm projects and some opensource, such as nginx
 #define error(x...) do {\
@@ -15,13 +16,50 @@
 						printf(x);\
 					 } while(0)
 
+#include <errno.h>
+
 extern int errno;
 
 void say_errno()
 {
-	error("error %d - %s\n", errno, strerror(errno));
+	error("errno %d - %s\n", errno, strerror(errno));
 }
 
+// *******************************************************************
+#include <time.h>
+
+char* curr_timestr()
+{	
+	time_t time_sec;
+	if (time(&time_sec) == -1)
+		return "[no-time-info]";
+
+	return ctime(&time_sec);
+}
+
+int give_random()
+{
+	static char srand_did = 0;
+
+	if (!srand_did)
+	{
+		srand_did = 1; // TODO: one call, out of rand() loop below, is enough
+		srand(time(NULL));
+	}
+
+	int loop = 5; // I need a random from 1 to 5
+	return (1+loop*(rand()/(RAND_MAX+1.0))); // rand() just gives [0, RAND_MAX]
+}
+
+void append_str(char* dst, ...)
+{// TODO: fix me
+	//va_list argv;
+	//va_start(argv, dst);
+	//va_arg(argv, int);
+	//va_end(argv);
+}
+
+// *******************************************************************
 #include <netinet/in.h> // 'sockaddr' struct
 /* const struct sockaddr *指针，指向要绑定给sockfd的协议地址。
 这个地址结构根据地址创建socket时的地址协议族的不同而不同:
@@ -77,10 +115,16 @@ typedef enum
 
 typedef struct trans_struct
 {
-	int trans_fd;	
-	TRANS_DOMAIN trans_domain;
-	TRANS_TYPE trans_type;
-	int max_conn;
+	char trans_mode; // server or client
+	int trans_fd; // socket fd
+	TRANS_DOMAIN trans_domain; // inet, inet6, ap_unix...
+	TRANS_TYPE trans_type; // tcp(stream), udp(dgram)...
+
+	// Server properties
+	int backlog; // max backlog for listen()
+	int max_conn; // allowed connected clients
+	int conn_nbr; // connected clients count
+	struct trans_struct* next_trans; // to maintain a Trans pool
 } Transaction;
 
 typedef void* TransHandler;
@@ -188,7 +232,7 @@ int opensock(TRANS_TYPE type, Transaction* trans)
 	memset(trans, 0, sizeof(Transaction));
 	trans->trans_domain = DOMAIN_IPv4;
 	trans->trans_type   = type;
-	trans->max_conn     = 3;
+	trans->backlog      = 5;
 	trans->trans_fd     = fd;
 
 	return 0;
@@ -230,7 +274,7 @@ int bindsock(Transaction* trans, const char* str)
 
 int listensock(Transaction* trans)
 {
-	int err = listen(trans->trans_fd, trans->max_conn);
+	int err = listen(trans->trans_fd, trans->backlog);
 	if (err < 0)
 	{
 		error("Failed to listen, err=%d\n", err);
@@ -297,6 +341,12 @@ int connectsock(Transaction* trans, const char* str)
 	return 0;
 }
 
+void closesock(Transaction* trans)
+{
+// TODO: fix me
+}
+
+// *******************************************************************
 static int system_le()
 {
 	int a = 1;
@@ -311,25 +361,75 @@ static int system_le()
 
 int main (int argc, char* argv[])
 {
-	Transaction trans;
-
 	if (system_le())
 		debug("System Little-endian\n");
 
 	inform("argc=%d, argv[0]=%s\n", argc, argv[0]);
 	char * dst = "ANY";//"192.168.100.218:3000" "ANY" // TODO: read from cmdline
 
+/*
+	Transaction init
+*/
+	Transaction trans;
+	memset(&trans, 0, sizeof(Transaction));
+
 	opensock(TRANS_TCP, &trans);
 	if (argc > 1)
 	{
-		connectsock(&trans, dst); // TODO: not on local 192.168.1.1:33
+		trans.trans_mode = 1; // non-zero value means Client
+// TODO: +bind() here to test the dedicated port to send
+		if (connectsock(&trans, dst) != 0) // TODO: test the case not on local
+			return -2;
 	}
 	else // server mode
 	{
-		bindsock(&trans, dst);
-		listensock(&trans);
-		accpetsock(&trans);
+		if (bindsock(&trans, dst) != 0)
+			return -2;
+
+		if (listensock(&trans) != 0)
+			return -2;
 	}
+
+/*
+	Here we go
+*/
+	char timestr[128];
+	if (trans.trans_mode) // the transaction is requesting...send
+	{
+		while (1)
+		{
+			memset(timestr, 0, sizeof(timestr));
+
+			sprintf(timestr, "Client sock %d from xxx:xx send:", trans.trans_fd);
+			strcat(timestr, curr_timestr());
+			debug("[Client send] %s\n", timestr);
+
+			int err = send(trans.trans_fd, timestr, strlen(timestr)+1, 0);// TODO: flags
+			if (err < 0)
+			{
+				error("Failed to send, err=%d\n", err);
+				return -3;
+			}
+
+			sleep(give_random());
+		}
+	}
+	else // standby for next transaction, and receive the requests...receive
+	{
+		while (1)
+		{
+			int err = accpetsock(&trans);
+			if (err != 0)
+			{
+				return -3;
+			}
+
+			debug("\n");
+		}
+	}
+
+	// TODO: RELEASE the resource before leaving (return or exit)!!!
+	closesock(&trans);
 
     return 0;
 }
