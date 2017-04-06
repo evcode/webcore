@@ -332,7 +332,11 @@ int accpetsock(Transaction* trans)
 {
 	// TODO: domain/AP_* comares with 'sockaddr' to judge. Now IPv4 ONLY
 	struct sockaddr_in sockaddr;
-	socklen_t socklen;
+	/* !!! IMPORTANT !!!
+		Do init of "socklen", especially to call accept();otherwise, 
+		it will cause the next accept() failure. I am not clear the root cause, 
+		but at least it's a better coding that avoids unnecessary/protential issue!! */
+	socklen_t socklen = sizeof(sockaddr);
 
 	debug("pid %d Accepting...\n", getpid());
 	int cli_fd = accept(trans->trans_fd, &sockaddr, &socklen); // TODO: added into Trans
