@@ -58,6 +58,15 @@ void append_str(char* dst, ...)
 	//va_end(argv);
 }
 
+#include <pthread.h>
+
+void new_task(void(*func)(void*), void* arg)
+{
+	pthread_t pthread;
+	if (pthread_create(&pthread, NULL, func, arg) != 0) // TODO: "pthread" retrieval and release
+		error("Task creation failed");
+}
+
 // *******************************************************************
 #include <netinet/in.h> // 'sockaddr' struct
 /* const struct sockaddr *指针，指向要绑定给sockfd的协议地址。
@@ -114,7 +123,7 @@ typedef enum
 
 typedef struct transconn
 {
-	int conn_fd;
+	int conn_fd; // Client (local) socket fd
 	struct sockaddr conn_addr; // TODO: now only IPv4
 	socklen_t conn_len;
 	struct transconn* nextconn;
@@ -123,16 +132,20 @@ typedef struct transconn
 typedef struct trans_struct
 {
 	char trans_mode; // server or client
-	int trans_fd; // socket fd
 	TRANS_DOMAIN trans_domain; // inet, inet6, ap_unix...
 	TRANS_TYPE trans_type; // tcp(stream), udp(dgram)...
+
+	// Socket // TODO: add into a TransConn
+	int trans_fd; // socket fd of Server/Remote
+	struct sockaddr trans_addr;
+	socklen_t trans_len;
 
 	// Server properties
 	int backlog; // max backlog for listen()
 
-	int max_conn; // allowed connected clients
+	int conn_max; // allowed connected clients
 	int conn_nbr; // connected clients count
-	TransConn* conn_pool; // to maintain a Trans pool
+	TransConn* conn_start; // that from Start to End maintains a Trans pool
 	TransConn* conn_end;
 } Transaction;
 
@@ -172,10 +185,30 @@ int format_sockaddr(int type, const char* str, struct sockaddr* s)
 	addr->sin_family      = AF_INET; // TODO: only IPv4 now
 	addr->sin_addr.s_addr = (ip_addr); // TODO: cannot htonl();othwerwise,bind() fails. WHY?????
 	addr->sin_port        = htons(ip_port);
-	debug("inet_ntoa(sockaddr) %s=%u(%#x), and port=%d(%#x)\n", inet_ntoa(addr->sin_addr),
-		addr->sin_addr.s_addr, addr->sin_addr.s_addr, addr->sin_port, addr->sin_port);
+	debug("IP %s=%u, and port=%d(networkaddr is %d)\n", inet_ntoa(addr->sin_addr),
+		addr->sin_addr.s_addr, ntohs(addr->sin_port), addr->sin_port);
 
 	return 0;
+}
+
+void trans_receiveloop(int conn_fd) // TODO: transfer a Trans struct not just a "fd"???
+{
+	char timestr[128];
+	int len;
+
+	debug("Start to receive at trans=%d\n", conn_fd);
+	while (1)
+	{
+		len = recv(conn_fd, timestr, sizeof(timestr), 0);// TODO: flags
+		if (len < 0)
+		{
+			error("Failed to receive, err=%d\n", len);
+			say_errno();
+			return -3;
+		}
+
+		inform("[pid=%d Server receive]%s\n", getpid(), timestr);
+	}
 }
 
 /* BSD System Calls Manual
@@ -236,7 +269,7 @@ int opensock(TRANS_TYPE type, Transaction* trans)
 		say_errno();
 		return -2;
 	}
-	debug("Open the trans <%d>\n", fd);
+	debug("Open the trans=%d\n", fd);
 
 	memset(trans, 0, sizeof(Transaction));
 	trans->trans_domain = DOMAIN_IPv4;
@@ -301,7 +334,7 @@ int accpetsock(Transaction* trans)
 	struct sockaddr_in sockaddr;
 	socklen_t socklen;
 
-	debug("Accepting...\n");
+	debug("pid %d Accepting...\n", getpid());
 	int cli_fd = accept(trans->trans_fd, &sockaddr, &socklen); // TODO: added into Trans
 	if (cli_fd < 0)
 	{
@@ -310,7 +343,7 @@ int accpetsock(Transaction* trans)
 		return -2;
 	}
 
-	debug("New comming connection=%d (%s:%d)\n", cli_fd, 
+	debug("--> New comming trans=%d (%s:%d)\n", cli_fd, 
 		inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port));
 
 	// Add the new client to the connection pool
@@ -320,15 +353,16 @@ int accpetsock(Transaction* trans)
 	memcpy(&conn->conn_addr, &sockaddr, socklen);
 	conn->conn_len = socklen;
 
-	if (trans->conn_pool == NULL)
+	if (trans->conn_start == NULL)
 	{
-		trans->conn_pool = conn;
+		trans->conn_start = conn;
 	}
 	else
 	{
 		trans->conn_end->nextconn = conn;
 	}
 	trans->conn_end = conn;
+
 	trans->conn_nbr ++;
 
 	return 0;
@@ -391,7 +425,11 @@ int main (int argc, char* argv[])
 	if (system_le())
 		debug("System Little-endian\n");
 
-	inform("argc=%d, argv[0]=%s\n", argc, argv[0]);
+	//debug("argc=%d, argv[0]=%s\n", argc, argv[0]);
+	int i = 0;
+	for (i = 0; i < argc; i ++)
+		printf("%s ", argv[i]);
+	printf("\n");
 	char * dst = "ANY";//"192.168.100.218:3000" "ANY" // TODO: read from cmdline
 
 /*
@@ -421,13 +459,13 @@ int main (int argc, char* argv[])
 	Here we go
 */
 	char timestr[128];
-	if (trans.trans_mode) // the transaction is requesting...send
+	if (trans.trans_mode) // the transaction is requesting
 	{
 		while (1)
 		{
 			memset(timestr, 0, sizeof(timestr));
 
-			sprintf(timestr, "Client sock %d from xxx:xx send:", trans.trans_fd);
+			sprintf(timestr, "Client xxx:xx says:"); // TODO: add local IP:port
 			strcat(timestr, curr_timestr());
 			debug("[Client send]%s\n", timestr);
 
@@ -442,9 +480,8 @@ int main (int argc, char* argv[])
 			sleep(give_random(5)); // sleep a random sec from 1 to 5
 		}
 	}
-	else // standby for next transaction, and receive the requests...receive
+	else // standby for next connection
 	{
-		int recv_len;
 		while (1)
 		{
 			int err = accpetsock(&trans);
@@ -453,20 +490,25 @@ int main (int argc, char* argv[])
 				return -3;
 			}
 
-			int pid = fork();
-			if (pid == 0)
-			{
-				// NOTE: "conn_end->conn_fd" is just the new accepted Client
-				int err = recv(trans.conn_end->conn_fd, timestr, sizeof(timestr), 0);// TODO: flags
-				if (err < 0)
+			// Another new task created to receive the requests...
+#if 1
+			// NOTE: "conn_end->conn_fd" is just the new accepted Client
+			new_task(trans_receiveloop, trans.conn_end->conn_fd);
+#else
+			//int pid = fork();
+			//if (pid == 0)
+			{				
+				int len = recv(trans.conn_end->conn_fd, timestr, sizeof(timestr), 0);// TODO: flags
+				if (len < 0)
 				{
-					error("Failed to receive, err=%d\n", err);
+					error("Failed to receive, err=%d\n", len);
 					say_errno();
 					return -3;
 				}
 
-				inform("[Server receive]%s\n", timestr);
+				inform("[pid=%d Server receive]%s\n", getpid(), timestr);
 			}
+#endif
 		}
 	}
 

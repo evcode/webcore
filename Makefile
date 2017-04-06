@@ -13,7 +13,7 @@ CFLAGS=-Wall -g
 $(TARGET):$(OBJS)
 	@echo ""
 	@echo "Building $@..."
-	$(Q)$(CC) $(LDFLAGS) $^ -o $@
+	$(Q)$(CC) $(LDFLAGS) $^ -o $@ -lpthread
 	@echo "Done"
 
 clean:
