@@ -4,15 +4,15 @@
 
 // TODO: double check how debug macro impl in tmm projects and some opensource, such as nginx
 #define error(x...) do {\
-						printf("[ERROR] %s,%d: ", __func__, __LINE__);\
+						printf("ERROR %s,%d|||", __func__, __LINE__);\
 						printf(x);\
 					 } while(0)
 #define inform(x...)  do {\
-						printf("[INFORM] %s,%d: ", __func__, __LINE__);\
+						printf("INFORM %s,%d|||", __func__, __LINE__);\
 						printf(x);\
 					 } while(0)
 #define debug(x...)  do {\
-						printf("[DEBUG] %s,%d: ", __func__, __LINE__);\
+						printf("DEBUG %s,%d|||", __func__, __LINE__);\
 						printf(x);\
 					 } while(0)
 
@@ -168,21 +168,25 @@ typedef struct trans_struct
 	TRANS_DOMAIN trans_domain; // inet, inet6, ap_unix...
 	TRANS_TYPE trans_type; // tcp(stream), udp(dgram)...
 
-	// Socket // TODO: add into a TransConn
-	int trans_fd; // socket fd of Server/Remote
+/*
+"local" means local binding, indicating the local host
+"remote": as the Server it maintains the client connection-pool; as per a Client it is the server
+*/
+	// "remote" server/client: connect(), accept() return
+	int trans_fd;
 	struct sockaddr trans_addr;
 	socklen_t trans_len;
+	// "local" host: bind(), listen(), accept()
+	TransConn* conn_start; // that from Start to End maintains a Trans pool
+	TransConn* conn_end;
+	int conn_max; // allowed connected clients
+	int conn_nbr; // connected clients count
 
 	// Server properties
 	int backlog; // max backlog for listen()
-
-	int conn_max; // allowed connected clients
-	int conn_nbr; // connected clients count
-	TransConn* conn_start; // that from Start to End maintains a Trans pool
-	TransConn* conn_end;
 } Transaction;
 
-typedef void* TransHandler;
+typedef void* TransDesc;
 
 int format_sockaddr(int type, const char* str, struct sockaddr* s)
 {
@@ -232,15 +236,19 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 	debug("Start to receive at trans=%d\n", conn_fd);
 	while (1)
 	{
+#if 0 // TEST: not receive to test when sndbuff is full, but TCP WIN is too large:(
+		sleep(2);
+#else
 		len = recv(conn_fd, timestr, sizeof(timestr), 0);// TODO: flags
 		if (len <= 0)
 		{
 			error("Failed to receive, err=%d\n", len);
 			say_errno();
-			return -3;
+			return;
 		}
 
 		inform("[pid=%d Server receive]%s\n", getpid(), timestr);
+#endif
 	}
 }
 
@@ -302,7 +310,16 @@ int opensock(TRANS_TYPE type, Transaction* trans)
 		say_errno();
 		return -2;
 	}
-	debug("Open the trans=%d\n", fd);
+
+	// Set snd/rcv buffer size
+	int sndbuffsize = 128, rcvbuffsize = 128;
+	setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuffsize, sizeof(sndbuffsize));
+	setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuffsize, sizeof(rcvbuffsize));
+
+	int len1 = sizeof(sndbuffsize), len2 = sizeof(rcvbuffsize);
+	getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuffsize, &len1);
+	getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuffsize, &len2);
+	debug("Open the trans=%d, sndbuff len=%d and rcvbuff len=%d\n", fd, sndbuffsize, rcvbuffsize);
 
 	memset(trans, 0, sizeof(Transaction));
 	trans->trans_domain = DOMAIN_IPv4;
@@ -543,7 +560,7 @@ int main (int argc, char* argv[])
 			{
 				debug("Server child %d (recv) continues\n", getpid());
 				trans_recvtask(trans.conn_end->conn_fd);
-				debug("--> Server (%d) recvtask ends", getpid());
+				debug("--> Server (%d) recvtask ends\n", getpid());
 				/* NOTE: child (client) ends, so must exit;
 				otherwise the client will loop to next accept(), which not we want */
 				closesock(&trans);

@@ -25,6 +25,9 @@ clean:
 	@echo "Compiling $@..."
 	$(Q)$(CC) $(CFLAGS) -c $< -o $@
 
+killall:
+	ps -ef|grep $(TARGET)|grep -v grep|cut -c 9-11|xargs sudo kill -9
+
 dump:
 	@echo "SRCS=$(SRCS)"
 	@echo "OBJS=$(OBJS)"
