@@ -16,6 +16,7 @@
 						printf(x);\
 					 } while(0)
 
+// *******************************************************************
 #include <errno.h>
 
 extern int errno;
@@ -25,7 +26,6 @@ void say_errno()
 	error("errno %d - %s\n", errno, strerror(errno));
 }
 
-// *******************************************************************
 #include <time.h>
 
 char* curr_timestr()
@@ -47,7 +47,7 @@ int give_random(int loop)
 		srand(time(NULL));
 	}
 
-	return (1+loop*(rand()/(RAND_MAX+1.0))); // rand() just gives [0, RAND_MAX]
+	return (1+loop*(rand()/(RAND_MAX+1.0))); // NOTE rand() just gives [0, RAND_MAX]
 }
 
 void append_str(char* dst, ...)
@@ -65,6 +65,39 @@ void new_task(void(*func)(void*), void* arg)
 	pthread_t pthread;
 	if (pthread_create(&pthread, NULL, func, arg) != 0) // TODO: "pthread" retrieval and release
 		error("Task creation failed");
+}
+
+#include <signal.h>
+/*
+typedef void (*sighandler_t)(int);
+
+sighandler_t signal(int signum, sighandler_t handler);
+int sigaction(int signum, const struct sigaction *act, struct sigaction *oldact);
+
+Tested on Ubuntu:
+2:  ctrl+c
+20: ctrl+z
+15:	"kill"
+*/
+void sig_routine(int signum)
+{
+	switch(signum)
+	{
+		case SIGCHLD:
+			debug("** SIGCHLD captured\n");
+		break;
+		case SIGQUIT:
+			debug("** SIGQUIT captured\n");
+		break;
+		case SIGKILL:
+			debug("** SIGKILL captured\n");
+		break;
+		default:
+			debug("** The signal %d captured\n", signum);
+		break;
+	}
+
+	exit(0);
 }
 
 // *******************************************************************
@@ -102,7 +135,7 @@ struct sockaddr_un {
 };
 */
 
-#include <arpa/inet.h> // dedicate to inet_ntoa();otherwise, crash!!!
+#include <arpa/inet.h> // NOTE dedicate to inet_ntoa();otherwise, crash!!!
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -170,7 +203,7 @@ int format_sockaddr(int type, const char* str, struct sockaddr* s)
 	else
 	{
 		char ip_str[32];
-	    int nbr = sscanf(str, "%[0-9,.]:%d", ip_str, &ip_port); // AMAZING sscanf()!!
+	    int nbr = sscanf(str, "%[0-9,.]:%d", ip_str, &ip_port); // NOTE AMAZING sscanf()!!
 	    if (nbr != 2)
 	    {
 	    	error("Failed to format sockaddr by %s\n", str);
@@ -191,7 +224,7 @@ int format_sockaddr(int type, const char* str, struct sockaddr* s)
 	return 0;
 }
 
-void trans_receiveloop(int conn_fd) // TODO: transfer a Trans struct not just a "fd"???
+void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd"???
 {
 	char timestr[128];
 	int len;
@@ -200,7 +233,7 @@ void trans_receiveloop(int conn_fd) // TODO: transfer a Trans struct not just a 
 	while (1)
 	{
 		len = recv(conn_fd, timestr, sizeof(timestr), 0);// TODO: flags
-		if (len < 0)
+		if (len <= 0)
 		{
 			error("Failed to receive, err=%d\n", len);
 			say_errno();
@@ -332,7 +365,7 @@ int accpetsock(Transaction* trans)
 {
 	// TODO: domain/AP_* comares with 'sockaddr' to judge. Now IPv4 ONLY
 	struct sockaddr_in sockaddr;
-	/* !!! IMPORTANT !!!
+	/*  NOTE !!! IMPORTANT !!!
 		Do init of "socklen", especially to call accept();otherwise, 
 		it will cause the next accept() failure. I am not clear the root cause, 
 		but at least it's a better coding that avoids unnecessary/protential issue!! */
@@ -436,6 +469,12 @@ int main (int argc, char* argv[])
 	printf("\n");
 	char * dst = "ANY";//"192.168.100.218:3000" "ANY" // TODO: read from cmdline
 
+	int signum = 0;
+	for (signum = 0; signum <= 30; signum ++) // a test - actually no need install so many
+	{
+		//signal(signum, sig_routine); // TODO: replace with "sigaction()"
+	}
+
 /*
 	Transaction init
 */
@@ -471,10 +510,10 @@ int main (int argc, char* argv[])
 
 			sprintf(timestr, "Client xxx:xx says:"); // TODO: add local IP:port
 			strcat(timestr, curr_timestr());
-			debug("[Client send]%s\n", timestr);
+			debug("[pid=%d Client send]%s\n", getpid(), timestr);
 
 			int err = send(trans.trans_fd, timestr, strlen(timestr)+1, 0);// TODO: flags
-			if (err < 0)
+			if (err <= 0)
 			{
 				error("Failed to send, err=%d\n", err);
 				say_errno();
@@ -495,22 +534,27 @@ int main (int argc, char* argv[])
 			}
 
 			// Another new task created to receive the requests...
-#if 1
+#if 0
 			// NOTE: "conn_end->conn_fd" is just the new accepted Client
-			new_task(trans_receiveloop, trans.conn_end->conn_fd);
+			new_task(trans_recvtask, trans.conn_end->conn_fd);
 #else
-			//int pid = fork();
-			//if (pid == 0)
-			{				
-				int len = recv(trans.conn_end->conn_fd, timestr, sizeof(timestr), 0);// TODO: flags
-				if (len < 0)
-				{
-					error("Failed to receive, err=%d\n", len);
-					say_errno();
-					return -3;
-				}
+			int pid = fork();
+			if (pid == 0)
+			{
+				debug("Server child %d (recv) continues\n", getpid());
+				trans_recvtask(trans.conn_end->conn_fd);
+				debug("--> Server (%d) recvtask ends", getpid());
+				/* NOTE: child (client) ends, so must exit;
+				otherwise the client will loop to next accept(), which not we want */
+				closesock(&trans);
+				exit(0);
+			}
+			else
+			{
+				debug("Server parent %d (accept) continues\n", getpid());
 
-				inform("[pid=%d Server receive]%s\n", getpid(), timestr);
+				// TODO end the zombie
+				// TOOD: close any fd, especially client-fd???
 			}
 #endif
 		}
