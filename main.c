@@ -73,11 +73,39 @@ typedef void (*sighandler_t)(int);
 
 sighandler_t signal(int signum, sighandler_t handler);
 int sigaction(int signum, const struct sigaction *act, struct sigaction *oldact);
-
-Tested on Ubuntu:
-2:  ctrl+c
-20: ctrl+z
-15:	"kill"
+:
+     No    Name         Default Action       Description
+     1     SIGHUP       terminate process    terminal line hangup
+     2     SIGINT       terminate process    interrupt program
+     3     SIGQUIT      create core image    quit program
+     4     SIGILL       create core image    illegal instruction
+     5     SIGTRAP      create core image    trace trap
+     6     SIGABRT      create core image    abort program (formerly SIGIOT)
+     7     SIGEMT       create core image    emulate instruction executed
+     8     SIGFPE       create core image    floating-point exception
+     9     SIGKILL      terminate process    kill program
+     10    SIGBUS       create core image    bus error
+     11    SIGSEGV      create core image    segmentation violation
+     12    SIGSYS       create core image    non-existent system call invoked
+     13    SIGPIPE      terminate process    write on a pipe with no reader
+     14    SIGALRM      terminate process    real-time timer expired
+     15    SIGTERM      terminate process    software termination signal
+     16    SIGURG       discard signal       urgent condition present on socket
+     17    SIGSTOP      stop process         stop (cannot be caught or ignored)
+     18    SIGTSTP      stop process         stop signal generated from keyboard
+     19    SIGCONT      discard signal       continue after stop
+     20    SIGCHLD      discard signal       child status has changed
+     21    SIGTTIN      stop process         background read attempted from control terminal
+     22    SIGTTOU      stop process         background write attempted to control terminal
+     23    SIGIO        discard signal       I/O is possible on a descriptor (see fcntl(2))
+     24    SIGXCPU      terminate process    cpu time limit exceeded (see setrlimit(2))
+     25    SIGXFSZ      terminate process    file size limit exceeded (see setrlimit(2))
+     26    SIGVTALRM    terminate process    virtual time alarm (see setitimer(2))
+     27    SIGPROF      terminate process    profiling timer alarm (see setitimer(2))
+     28    SIGWINCH     discard signal       Window size change
+     29    SIGINFO      discard signal       status request from keyboard
+     30    SIGUSR1      terminate process    User defined signal 1
+     31    SIGUSR2      terminate process    User defined signal 2
 */
 void sig_routine(int signum)
 {
@@ -86,12 +114,19 @@ void sig_routine(int signum)
 		case SIGCHLD:
 			debug("** SIGCHLD captured\n");
 		break;
-		case SIGQUIT:
-			debug("** SIGQUIT captured\n");
+
+		case SIGINT: // ctrl+c
+			debug("** SIGINT captured\n");
 		break;
-		case SIGKILL:
-			debug("** SIGKILL captured\n");
+
+		case SIGTSTP: //ctrl+z
+			debug("** SIGTSTP captured\n");
 		break;
+
+		case SIGTERM: // "kill"
+			debug("** SIGTERM captured\n");
+		break;
+
 		default:
 			debug("** The signal %d captured\n", signum);
 		break;
@@ -168,21 +203,16 @@ typedef struct trans_struct
 	TRANS_DOMAIN trans_domain; // inet, inet6, ap_unix...
 	TRANS_TYPE trans_type; // tcp(stream), udp(dgram)...
 
-/*
-"local" means local binding, indicating the local host
-"remote": as the Server it maintains the client connection-pool; as per a Client it is the server
-*/
-	// "remote" server/client: connect(), accept() return
 	int trans_fd;
 	struct sockaddr trans_addr;
 	socklen_t trans_len;
-	// "local" host: bind(), listen(), accept()
+
+	// Server properties
 	TransConn* conn_start; // that from Start to End maintains a Trans pool
 	TransConn* conn_end;
 	int conn_max; // allowed connected clients
 	int conn_nbr; // connected clients count
 
-	// Server properties
 	int backlog; // max backlog for listen()
 } Transaction;
 
@@ -247,7 +277,9 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 			return;
 		}
 
-		inform("[pid=%d Server receive]%s\n", getpid(), timestr);
+		inform("pid=%d Server receive <<\n", getpid());
+		printf("%s", timestr);
+		printf("(end)\n");
 #endif
 	}
 }
@@ -312,7 +344,7 @@ int opensock(TRANS_TYPE type, Transaction* trans)
 	}
 
 	// Set snd/rcv buffer size
-	int sndbuffsize = 128, rcvbuffsize = 128;
+	int sndbuffsize = 64, rcvbuffsize = 64;
 	setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuffsize, sizeof(sndbuffsize));
 	setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuffsize, sizeof(rcvbuffsize));
 
@@ -388,7 +420,7 @@ int accpetsock(Transaction* trans)
 		but at least it's a better coding that avoids unnecessary/protential issue!! */
 	socklen_t socklen = sizeof(sockaddr);
 
-	debug("pid %d Accepting...\n", getpid());
+	debug("pid=%d Accepting...\n", getpid());
 	int cli_fd = accept(trans->trans_fd, &sockaddr, &socklen); // TODO: added into Trans
 	if (cli_fd < 0)
 	{
@@ -502,7 +534,10 @@ int main (int argc, char* argv[])
 	if (argc > 1)
 	{
 		trans.trans_mode = 1; // non-zero value means Client
-// TODO: +bind() here to test the dedicated port to send
+//TODO: NOW the code can work!! Go to get local port from cmdline
+//		if (bindsock(&trans, "127.0.0.1:9002") !=0 ) // NOTE: +bind() to use the dedicated port
+//			return -2;
+
 		if (connectsock(&trans, dst) != 0) // TODO: test the case not on local
 			return -2;
 	}
@@ -527,7 +562,9 @@ int main (int argc, char* argv[])
 
 			sprintf(timestr, "Client xxx:xx says:"); // TODO: add local IP:port
 			strcat(timestr, curr_timestr());
-			debug("[pid=%d Client send]%s\n", getpid(), timestr);
+			debug("pid=%d Client send >>\n", getpid());
+			printf("%s", timestr);
+			debug("(end)\n");
 
 			int err = send(trans.trans_fd, timestr, strlen(timestr)+1, 0);// TODO: flags
 			if (err <= 0)
@@ -558,9 +595,9 @@ int main (int argc, char* argv[])
 			int pid = fork();
 			if (pid == 0)
 			{
-				debug("Server child %d (recv) continues\n", getpid());
+				debug("After fork, Server child pid=%d (recv) continues\n", getpid());
 				trans_recvtask(trans.conn_end->conn_fd);
-				debug("--> Server (%d) recvtask ends\n", getpid());
+				debug("--> Server pid=%d recvtask ends\n", getpid());
 				/* NOTE: child (client) ends, so must exit;
 				otherwise the client will loop to next accept(), which not we want */
 				closesock(&trans);
@@ -568,7 +605,7 @@ int main (int argc, char* argv[])
 			}
 			else
 			{
-				debug("Server parent %d (accept) continues\n", getpid());
+				debug("After fork, Server parent pid=%d (accept) continues\n", getpid());
 
 				// TODO end the zombie
 				// TOOD: close any fd, especially client-fd???
