@@ -16,6 +16,12 @@
 						printf(x);\
 					 } while(0)
 
+typedef enum
+{
+	FALSE = 0,
+	TRUE  = 1
+} BOOL;
+
 // *******************************************************************
 #include <errno.h>
 
@@ -175,6 +181,9 @@ struct sockaddr_un {
 #include <sys/types.h>
 #include <sys/socket.h>
 
+#define TRANS_RECVBUF_SIZE 120
+#define TRANS_SENDBUF_SIZE (TRANS_RECVBUF_SIZE+8)
+
 typedef enum
 {
     TRANS_IP = 0,
@@ -258,10 +267,25 @@ int format_sockaddr(int type, const char* str, struct sockaddr* s)
 	return 0;
 }
 
+void construct_msg(char* msg, int msglen) // TODO: design a "listner" mechanism??? to notify, such as HTTP coming event
+{
+	debug("A new message constructed:\n");
+
+	int i;
+	for (i = 0; i < msglen; i++)
+		printf("%c", msg[i]);
+	//printf("%s", transrecv);
+	printf("(end)\n");
+}
+
 void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd"???
 {
-	char timestr[128];
-	int len;
+	char transrecv[TRANS_RECVBUF_SIZE];
+	int bufflen = sizeof(transrecv), len;
+
+#define TOTOAL_MSG_LEN 1500
+	char totalmsg[TOTOAL_MSG_LEN]; // TODO: replace with realloc(), or direclty apply it to "transrecv" - char* transrecv;
+	int totalrecv;
 
 	debug("Start to receive at trans=%d\n", conn_fd);
 	while (1)
@@ -269,17 +293,45 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 #if 0 // TEST: not receive to test when sndbuff is full, but TCP WIN is too large:(
 		sleep(2);
 #else
-		len = recv(conn_fd, timestr, sizeof(timestr), 0);// TODO: flags
-		if (len <= 0)
-		{
-			error("Failed to receive, err=%d\n", len);
-			say_errno();
-			return;
-		}
+		totalrecv = 0;
 
-		inform("pid=%d Server receive <<\n", getpid());
-		printf("%s", timestr);
-		printf("(end)\n");
+		do
+		{
+			len = recv(conn_fd, transrecv, bufflen, 0);// TODO: flags
+			if (len == 0) // return 0, for TCP, means the peer has closed its half side of the connection
+			{
+				debug("End receive task, len=%d\n", len);
+
+				if (totalrecv > 0) // ever received - in case of that "totalrecv % bufflen == 0"
+					construct_msg(totalmsg, totalrecv); // Submit received bytes
+				return;
+			}
+			else if (len < 0)
+			{
+				error("Failed to receive, err=%d\n", len);
+				say_errno();
+				return;
+			} // TODO: len > bufflen, possible????
+
+			debug("pid=%d Server receive %d bytes<<\n", getpid(), len);
+/*			int i;
+			for (i = 0; i < len; i++)
+				printf("%c", transrecv[i]);
+			//printf("%s", transrecv);
+			printf("(end)\n");
+*/
+			// Bufffering
+			if (totalrecv >= TOTOAL_MSG_LEN)
+			{
+				error("Too large message requested!!");
+				return;
+			}
+			memcpy(totalmsg+totalrecv, transrecv, len);
+			totalrecv += len;
+		} while (len == bufflen); // MOSTLY there're still bytes remaind in kernel
+
+		// Submit received bytes
+		construct_msg(totalmsg, totalrecv);
 #endif
 	}
 }
@@ -553,27 +605,32 @@ int main (int argc, char* argv[])
 /*
 	Here we go
 */
-	char timestr[128];
+	char transsnd[TRANS_SENDBUF_SIZE];
+	int bufflen = sizeof(transsnd), len;
 	if (trans.trans_mode) // the transaction is requesting
 	{
 		while (1)
 		{
-			memset(timestr, 0, sizeof(timestr));
+			memset(transsnd, 'c', sizeof(transsnd));
 
-			sprintf(timestr, "Client xxx:xx says:"); // TODO: add local IP:port
-			strcat(timestr, curr_timestr());
-			debug("pid=%d Client send >>\n", getpid());
-			printf("%s", timestr);
-			debug("(end)\n");
+			sprintf(transsnd, "Client xxx:xx says:"); // TODO: add local IP:port
+			strcat(transsnd, curr_timestr());
 
-			int err = send(trans.trans_fd, timestr, strlen(timestr)+1, 0);// TODO: flags
-			if (err <= 0)
+			len = send(trans.trans_fd, transsnd, bufflen, 0);// TODO: flags
+			if (len != bufflen)
 			{
-				error("Failed to send, err=%d\n", err);
+				error("Failed to send, err=%d\n", len);
 				say_errno();
 				return -3;
 			}
 
+			debug("pid=%d Client send >>\n", getpid());
+/*			int i;
+			for (i = 0; i < len; i ++)
+				printf("%c", transsnd[i]);
+			//printf("%s", transsnd);
+			printf("(end)\n");
+*/
 			sleep(give_random(5)); // sleep a random sec from 1 to 5
 		}
 	}
@@ -597,7 +654,8 @@ int main (int argc, char* argv[])
 			{
 				debug("After fork, Server child pid=%d (recv) continues\n", getpid());
 				trans_recvtask(trans.conn_end->conn_fd);
-				debug("--> Server pid=%d recvtask ends\n", getpid());
+				debug("--> Server pid=%d recvtask ends\n\n", getpid());
+
 				/* NOTE: child (client) ends, so must exit;
 				otherwise the client will loop to next accept(), which not we want */
 				closesock(&trans);
