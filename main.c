@@ -292,9 +292,9 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 	debug("Start to receive at trans=%d\n", conn_fd);
 	while (1)
 	{
-#ifdef TEST_SEND_STRESS // TEST: not receive to test when sndbuff is full, but TCP WIN is too large:(
-		sleep(2);
-#else
+#ifdef TEST_SEND_STRESS
+		sleep(give_random(10));
+#endif // for Stress not sleep always - i think it simulates an actual env.
 		totalrecv = 0;
 
 		do
@@ -334,7 +334,6 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 
 		// Submit received bytes
 		construct_msg(totalmsg, totalrecv);
-#endif
 	}
 }
 
@@ -398,13 +397,16 @@ int opensock(TRANS_TYPE type, Transaction* trans)
 	}
 
 	// Set snd/rcv buffer size
-	/* The buffsize may impact on TCP Window initial size, which are not exactly same -
-	its initation will be assigned by System according the config here*/
-	// TODO: here buff means the local fd - how about the conn_fd from remote????
+	/* The recv-buffsize is TCP Window initation, but the actual Win size may be renewed 
+	by a system (mini?default, WIN=1120 on my Ubuntu) value,
+	such as: cat /proc/sys/net/ipv4/tcp_*mem ??? */
 	int sndbuffsize = 64, rcvbuffsize = 64;
 	setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuffsize, sizeof(sndbuffsize));
 	setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuffsize, sizeof(rcvbuffsize));
 
+	// NOTE: the following get value is "x2" of buffsize value. WHY?????
+	// NOTE: here buff means the local fd - how about the conn_fd from remote:
+	//       they're same!! refer to acceptsock()
 	int len1 = sizeof(sndbuffsize), len2 = sizeof(rcvbuffsize);
 	getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuffsize, &len1);
 	getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuffsize, &len2);
@@ -467,7 +469,7 @@ int listensock(Transaction* trans)
 	return 0;
 }
 
-int accpetsock(Transaction* trans)
+int acceptsock(Transaction* trans)
 {
 	// TODO: domain/AP_* comares with 'sockaddr' to judge. Now IPv4 ONLY
 	struct sockaddr_in sockaddr;
@@ -488,6 +490,14 @@ int accpetsock(Transaction* trans)
 
 	debug("--> New comming trans=%d (%s:%d)\n", cli_fd, 
 		inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port));
+
+	// Check remote conn's buffsize
+	int fd = cli_fd;
+	int sndbuffsize, rcvbuffsize;
+	int len1 = sizeof(sndbuffsize), len2 = sizeof(rcvbuffsize);
+	getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuffsize, &len1);
+	getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuffsize, &len2);
+	debug("    And, the new conn's sndbuff len=%d and rcvbuff len=%d\n", sndbuffsize, rcvbuffsize);
 
 	// Add the new client to the connection pool
 	TransConn* conn = (TransConn*)malloc(sizeof(TransConn));
@@ -640,7 +650,7 @@ int main (int argc, char* argv[])
 			printf("(end)\n");
 */
 #ifdef TEST_SEND_STRESS
-			// not sleep to keep Stress send
+			// not sleep to keep sending until next blocking
 #else
 			sleep(give_random(5)); // sleep a random sec from 1 to 5
 #endif
@@ -650,7 +660,7 @@ int main (int argc, char* argv[])
 	{
 		while (1)
 		{
-			int err = accpetsock(&trans);
+			int err = acceptsock(&trans);
 			if (err != 0)
 			{
 				return -3;
