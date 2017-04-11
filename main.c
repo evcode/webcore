@@ -181,6 +181,8 @@ struct sockaddr_un {
 #include <sys/types.h>
 #include <sys/socket.h>
 
+//#define TEST_SEND_STRESS 1
+
 #define TRANS_RECVBUF_SIZE 120
 #define TRANS_SENDBUF_SIZE (TRANS_RECVBUF_SIZE+8)
 
@@ -290,7 +292,7 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 	debug("Start to receive at trans=%d\n", conn_fd);
 	while (1)
 	{
-#if 0 // TEST: not receive to test when sndbuff is full, but TCP WIN is too large:(
+#ifdef TEST_SEND_STRESS // TEST: not receive to test when sndbuff is full, but TCP WIN is too large:(
 		sleep(2);
 #else
 		totalrecv = 0;
@@ -396,6 +398,9 @@ int opensock(TRANS_TYPE type, Transaction* trans)
 	}
 
 	// Set snd/rcv buffer size
+	/* The buffsize may impact on TCP Window initial size, which are not exactly same -
+	its initation will be assigned by System according the config here*/
+	// TODO: here buff means the local fd - how about the conn_fd from remote????
 	int sndbuffsize = 64, rcvbuffsize = 64;
 	setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuffsize, sizeof(sndbuffsize));
 	setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuffsize, sizeof(rcvbuffsize));
@@ -616,6 +621,9 @@ int main (int argc, char* argv[])
 			sprintf(transsnd, "Client xxx:xx says:"); // TODO: add local IP:port
 			strcat(transsnd, curr_timestr());
 
+#ifdef TEST_SEND_STRESS
+			debug("Sending...\n"); // to check the blocking
+#endif
 			len = send(trans.trans_fd, transsnd, bufflen, 0);// TODO: flags
 			if (len != bufflen)
 			{
@@ -624,14 +632,18 @@ int main (int argc, char* argv[])
 				return -3;
 			}
 
-			debug("pid=%d Client send >>\n", getpid());
+			debug("pid=%d Client sent %d bytes>>\n", getpid(), len);
 /*			int i;
 			for (i = 0; i < len; i ++)
 				printf("%c", transsnd[i]);
 			//printf("%s", transsnd);
 			printf("(end)\n");
 */
+#ifdef TEST_SEND_STRESS
+			// not sleep to keep Stress send
+#else
 			sleep(give_random(5)); // sleep a random sec from 1 to 5
+#endif
 		}
 	}
 	else // standby for next connection

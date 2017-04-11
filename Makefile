@@ -9,6 +9,9 @@ SRCS=$(wildcard *.c)
 OBJS=$(patsubst %.c,%.o,$(SRCS))
 
 CFLAGS=-Wall -g
+ifdef TEST_SEND_STRESS
+CFLAGS += -DTEST_SEND_STRESS
+endif
 
 $(TARGET):$(OBJS)
 	@echo ""
