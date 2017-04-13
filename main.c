@@ -64,6 +64,38 @@ void append_str(char* dst, ...)
 	//va_end(argv);
 }
 
+#define TRNAS_ENV_MAX 128
+static int envnum = 0;
+static char* envs[TRNAS_ENV_MAX]={NULL}; // NOTE: make sure last item is NULL
+
+void env_add(char* key, int len1, char* value, int len2)
+{
+	if (envnum == TRNAS_ENV_MAX-1) // the last one is reserved to NULL???
+	{
+		error("Reached the max number of environment variants!!");
+		return;
+	}
+
+	char* env = malloc(len1+len2);
+	memcpy(env, key, len1);
+	env[len1-1]='='; // replace '/0' at end of "key"
+	memcpy(env+len1, value, len2);
+
+	envs[envnum] = env;
+	envnum ++;
+}
+void env_dump()
+{
+	debug("Env. variants:\n");
+	int i;
+	for (i = 0; i < envnum; i ++)
+	{
+		printf("%s ", envs[i]);
+	}
+	printf("\n");
+}
+// release all
+
 #include <pthread.h>
 
 void new_task(void(*func)(void*), void* arg)
@@ -287,8 +319,12 @@ void dumpsock(int fd)
 
 	getsockopt(fd, IPPROTO_IP, TCP_NODELAY, &otpvalue, &optlen);
 	debug("TCP_NODELAY:%d\n", otpvalue);
+#ifdef MACOS
+	debug("TCP_CORK:%s\n", "<not supported on macos>");
+#else
 	getsockopt(fd, IPPROTO_IP, TCP_CORK, &otpvalue, &optlen);
 	debug("TCP_CORK:%d\n", otpvalue);
+#endif
 
 	debug("\n");
 }
@@ -424,9 +460,12 @@ int opensock(TRANS_TYPE type, Transaction* trans)
 	/* The recv-buffsize is TCP Window initation, but the actual Win size may be renewed 
 	by a system (mini?default, WIN=1120 on my Ubuntu) value,
 	such as: cat /proc/sys/net/ipv4/tcp_*mem ??? */
-	int sndbuffsize = 64, rcvbuffsize = 64;
-	setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuffsize, sizeof(sndbuffsize));
-	setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuffsize, sizeof(rcvbuffsize));
+	int optvalue = 1000;
+	setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &optvalue, sizeof(optvalue));
+	optvalue = 500;
+	setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &optvalue, sizeof(optvalue));
+	optvalue = 1;
+	setsockopt(fd, IPPROTO_IP, TCP_NODELAY, &optvalue, sizeof(optvalue));
 
 	debug("Open the trans=%d\n", fd);	
 	// NOTE: here buff means the local fd - how about the conn_fd from remote:
@@ -587,7 +626,7 @@ static int system_le()
 	return (*(char*)&a);
 }
 
-int main (int argc, char* argv[])
+int main (int argc, char* argv[], char* envp[])
 {
 	if (system_le())
 		debug("System Little-endian\n");
@@ -596,7 +635,10 @@ int main (int argc, char* argv[])
 	int i = 0;
 	for (i = 0; i < argc; i ++)
 		printf("%s ", argv[i]);
-	printf("\n");
+	for (i = 0; envp[i] != NULL; i ++)
+		printf("%s ", envp[i]);
+	printf("\n\n");
+
 	char * dst = "ANY";//"192.168.100.218:3000" "ANY" // TODO: read from cmdline
 
 	int signum = 0;

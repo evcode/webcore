@@ -13,6 +13,11 @@ ifdef TEST_SEND_STRESS
 CFLAGS += -DTEST_SEND_STRESS
 endif
 
+ifeq ($(HOSTOS),macos)
+CFLAGS += -DMACOS
+#CFLAGS += -DHOSTOS=$(HOSTOS)
+endif
+
 $(TARGET):$(OBJS)
 	@echo ""
 	@echo "Building $@..."
