@@ -269,6 +269,30 @@ int format_sockaddr(int type, const char* str, struct sockaddr* s)
 	return 0;
 }
 
+#include <netinet/in.h> // for such as "IPPROTO_IP"
+#include <netinet/tcp.h> // for such as "TCP_NODELAY"
+void dumpsock(int fd)
+{
+	int otpvalue;
+	socklen_t optlen = sizeof(otpvalue); // the init is mandatory !!!!!
+
+	debug("----------------------------------\n");
+	debug("The dump information of socket fd(%d)\n", fd);
+
+	// NOTE: the following get value is "x2" of buffsize SET value. WHY?????
+	getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &otpvalue, &optlen);
+	debug("SO_RCVBUF:%d\n", otpvalue);
+	getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &otpvalue, &optlen);
+	debug("SO_SNDBUF:%d\n", otpvalue);
+
+	getsockopt(fd, IPPROTO_IP, TCP_NODELAY, &otpvalue, &optlen);
+	debug("TCP_NODELAY:%d\n", otpvalue);
+	getsockopt(fd, IPPROTO_IP, TCP_CORK, &otpvalue, &optlen);
+	debug("TCP_CORK:%d\n", otpvalue);
+
+	debug("\n");
+}
+
 void construct_msg(char* msg, int msglen) // TODO: design a "listner" mechanism??? to notify, such as HTTP coming event
 {
 	debug("A new message constructed:\n");
@@ -404,13 +428,10 @@ int opensock(TRANS_TYPE type, Transaction* trans)
 	setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuffsize, sizeof(sndbuffsize));
 	setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuffsize, sizeof(rcvbuffsize));
 
-	// NOTE: the following get value is "x2" of buffsize value. WHY?????
+	debug("Open the trans=%d\n", fd);	
 	// NOTE: here buff means the local fd - how about the conn_fd from remote:
 	//       they're same!! refer to acceptsock()
-	int len1 = sizeof(sndbuffsize), len2 = sizeof(rcvbuffsize);
-	getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuffsize, &len1);
-	getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuffsize, &len2);
-	debug("Open the trans=%d, sndbuff len=%d and rcvbuff len=%d\n", fd, sndbuffsize, rcvbuffsize);
+	dumpsock(fd);
 
 	memset(trans, 0, sizeof(Transaction));
 	trans->trans_domain = DOMAIN_IPv4;
@@ -490,14 +511,7 @@ int acceptsock(Transaction* trans)
 
 	debug("--> New comming trans=%d (%s:%d)\n", cli_fd, 
 		inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port));
-
-	// Check remote conn's buffsize
-	int fd = cli_fd;
-	int sndbuffsize, rcvbuffsize;
-	int len1 = sizeof(sndbuffsize), len2 = sizeof(rcvbuffsize);
-	getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &sndbuffsize, &len1);
-	getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuffsize, &len2);
-	debug("    And, the new conn's sndbuff len=%d and rcvbuff len=%d\n", sndbuffsize, rcvbuffsize);
+	dumpsock(cli_fd);
 
 	// Add the new client to the connection pool
 	TransConn* conn = (TransConn*)malloc(sizeof(TransConn));
