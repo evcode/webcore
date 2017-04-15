@@ -27,7 +27,7 @@ int give_random(int loop)
 	return (1+loop*(rand()/(RAND_MAX+1.0))); // NOTE rand() just gives [0, RAND_MAX]
 }
 
-void append_str(char* dst, ...)
+void str_append(char* dst, ...)
 {// TODO: fix me
 	//va_list argv;
 	//va_start(argv, dst);
@@ -35,39 +35,31 @@ void append_str(char* dst, ...)
 	//va_end(argv);
 }
 
-// *******************************************************************
-#define TRNAS_ENV_MAX 128
-
-static int envnum = 0;
-static char* envs[TRNAS_ENV_MAX]={NULL}; // NOTE: make sure last item is NULL
-
-void env_add(char* key, int len1, char* value, int len2)
+/* Tested:
+  s   |   h
+--------------
+"", 	"abc"
+"x", 	"abc"
+"a", 	"abc"
+"abc",	"abc"
+"abcd",	"abc"
+*/
+BOOL str_startwith(const char* s, const char* h)
 {
-	if (envnum == TRNAS_ENV_MAX-1) // the last one is reserved to NULL???
+	if ((strlen(s) <= 0) || (strlen(h) <= 0)) // handle it as invalid input
+		return FALSE;
+
+	while (*h != '\0')
 	{
-		error("Reached the max number of environment variants!!");
-		return;
+		if (*s != *h)
+			return FALSE;
+
+		s ++;
+		h ++;
 	}
 
-	char* env = malloc(len1+len2);
-	memcpy(env, key, len1);
-	env[len1-1]='='; // replace '/0' at end of "key"
-	memcpy(env+len1, value, len2);
-
-	envs[envnum] = env;
-	envnum ++;
+	return TRUE;
 }
-void env_dump()
-{
-	debug("Env. variants:\n");
-	int i;
-	for (i = 0; i < envnum; i ++)
-	{
-		printf("%s ", envs[i]);
-	}
-	printf("\n");
-}
-// TODO: release all
 
 // *******************************************************************
 #include <pthread.h>
@@ -76,7 +68,7 @@ void new_task(void(*func)(void*), void* arg)
 {
 	pthread_t pthread;
 	if (pthread_create(&pthread, NULL, func, arg) != 0) // TODO: "pthread" retrieval and release
-		error("Task creation failed");
+		error("Task creation failed\n");
 }
 
 #include <signal.h>

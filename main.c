@@ -5,15 +5,50 @@
 #include "util.h"
 
 // *******************************************************************
-void construct_msg(char* msg, int msglen) // TODO: design a "listner" mechanism??? to notify, such as HTTP coming event
+
+extern char** envlist_init(); // NOTE: (on MACOS??) it's MANDATORY;otherwise, it will crash when to read it here. WHY????????????
+
+void construct_msg(const char* msg, int msglen) // TODO: design a "listner" mechanism??? to notify, such as HTTP coming event
 {
 	debug("A new message constructed:\n");
+	if ((msg == NULL) || (msglen <= 0))
+	{
+		error("Bad parameters!!\n");
+		return;
+	}
 
 	int i;
+#if 0 // TEST the entire received bytes
 	for (i = 0; i < msglen; i++)
 		printf("%c", msg[i]);
-	//printf("%s", transrecv);
 	printf("(end)\n");
+#endif
+
+	char** envlist = envlist_init();
+
+	int envstart = 0;
+	for (i = 0; i < msglen; i++) // Parse the line one by one
+	{
+		if ((msg[i] == '\r') || (msg[i] == '\n')) // one line ends
+		{
+			int envlen = i - envstart; // not contains '\0'
+			if (envlen > 0) // to avoid that many '\r' or '\n' following together
+			{
+				char* envstr = malloc(envlen + 1); // TODO: any optimization can do here?? - not malloc always
+				memcpy(envstr, msg + envstart, envlen);
+				envstr[envlen] = '\0';
+
+				envlist_add(envstr);
+
+				free(envstr);
+				envstr = NULL;
+			}
+
+			envstart = i + 1; // substring to parse starting from next byte
+		}
+	}
+
+	envlist_dump(envlist, envlist_num());
 }
 
 // *******************************************************************
@@ -67,7 +102,7 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 			// Bufffering
 			if (totalrecv >= TOTOAL_MSG_LEN)
 			{
-				error("Too large message requested!!");
+				error("Too large message requested!!\n");
 				return;
 			}
 			memcpy(totalmsg+totalrecv, transrecv, len);
@@ -94,6 +129,18 @@ static int system_le()
 
 int main (int argc, char* argv[], char* envp[])
 {
+#if 0 // http analysis TEST
+	{
+		char* str = "GET /index HTTP/1.1\r\nHost: 127.0.0.1:9000\r\nUser-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_1) AppleWebKit/537.36\r\n";
+		int len = strlen(str)+1;
+		char * s = malloc(len);
+		memcpy(s, str, len);
+		construct_msg(s, len);
+
+		return 1;
+	}
+#endif
+
 	if (system_le())
 		debug("System Little-endian\n");
 
