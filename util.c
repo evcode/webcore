@@ -71,6 +71,38 @@ void new_task(void(*func)(void*), void* arg)
 		error("Task creation failed\n");
 }
 
+/* for example:
+		char* v[] = {"ls", "-al", "-t"};
+		new_exec("/bin/ls", v, NULL);
+
+	// Then, while the program runing:
+	// argv[0] = "ls"
+	// argv[1] = "-al"
+	// argv[2] = "-t"
+*/
+void new_exec(const char* exec, char *const argv[], char *const envp[])
+{
+	pid_t newpid = fork();
+	if (newpid == 0)
+	{
+		int exe = execve(exec, argv, envp);
+		if (exe < 0)
+		{
+			error("Failed to execute <%s>!!\n", exec);
+			say_errno();
+		}
+	}
+	else if (newpid < 0)
+	{
+		error("Failed to fork!!\n");
+		say_errno();
+	}
+	else
+	{
+		// TODO: waitpid??
+	}
+}
+
 #include <signal.h>
 /*
 typedef void (*sighandler_t)(int);

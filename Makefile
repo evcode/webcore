@@ -25,8 +25,10 @@ $(TARGET):$(OBJS)
 	@echo "Done"
 
 clean:
-	rm -rf $(TARGET)
-	rm -rf *.o
+	rm -f $(TARGET)
+	find . -name '*.o'|xargs rm -f
+
+	rm -f ./cgi/cgi
 
 %.o:%.c
 	@echo ""
@@ -40,3 +42,7 @@ dump:
 	@echo "SRCS=$(SRCS)"
 	@echo "OBJS=$(OBJS)"
 	@echo "CFLAGS=$(CFLAGS)"
+
+.PHONY:cgi
+cgi:
+	cd cgi/;gcc -o cgi cgi.c

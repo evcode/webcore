@@ -6,6 +6,125 @@
 
 // *******************************************************************
 
+/*
+       #include <unistd.h>
+       int pipe(int pipefd[2]);
+
+       #define _GNU_SOURCE             // See feature_test_macros(7)
+       #include <fcntl.h>              // Obtain O_* constant definitions
+       #include <unistd.h>
+       int pipe2(int pipefd[2], int flags);
+
+@flags:
+       O_NONBLOCK  Set the O_NONBLOCK file status flag on the two new open  file  descriptions.   Using  this  flag
+                   saves extra calls to fcntl(2) to achieve the same result.
+
+       O_CLOEXEC   Set the close-on-exec (FD_CLOEXEC) flag on the two new file descriptors.  See the description of
+                   the same flag in open(2) for reasons why this may be useful.
+
+----------------------------------------------------
+
+       #include <unistd.h>
+       int dup(int oldfd);
+       int dup2(int oldfd, int newfd);
+
+       #define _GNU_SOURCE             // See feature_test_macros(7) 
+       #include <fcntl.h>              // Obtain O_* constant definitions 
+       #include <unistd.h>
+       int dup3(int oldfd, int newfd, int flags);
+*/
+
+#define _GNU_SOURCE // mandatory???
+#include <fcntl.h> // + pipe2, and O_*
+#include <unistd.h> // for pipe(), dup, etc
+					// + STDIN_FILENO、STDOUT_FILENO and STDERR_FILENO
+
+void run_cgi(char* envp[])
+{
+	debug("++++++++++++++++++++ Start to run cgi...\n");
+#define PIPE_READ  0
+#define PIPE_WRITE 1
+
+	int tocgi[2]; // server channels to cgi
+	int fromcgi[2]; // cgi channels to server
+
+    /* Create the full-duplex pipes:
+    miniWeb (w tocgi[1])------------->>(r tocgi[0])   cgi
+    miniWeb (r fromcgi[0])<<-----------(w fromcgi[1]) cgi
+    */
+	int to_fd = pipe(tocgi);
+	if (to_fd < 0)
+	{
+		error("Failed to pipe!!\n");
+		say_errno();
+		return;
+	}
+	int from_fd = pipe(fromcgi);//pipe2(fromcgi, O_NONBLOCK);
+	if (from_fd < 0)
+	{
+		error("Failed to pipe!!\n");
+		say_errno();
+		return;
+	}
+
+	// Execute CGI
+	pid_t newpid = fork();
+	if (newpid == 0)
+	{
+		// redirect stdout of new execution - 
+		// it means cgi "printf" will write into fromcgi[1]
+		close(STDOUT_FILENO);
+		dup2(fromcgi[1], STDOUT_FILENO);
+		// and, no need to redirect its stdin, just close it
+		close(STDIN_FILENO);
+		//dup2(fromcgi[0], STDIN_FILENO);
+
+		char* exec = "cgi/cgi";
+		char* argv[] = {"cgi"};
+		int exe = execve(exec, argv, envp);
+		if (exe < 0)
+		{
+			error("Failed to execute <%s>!!\n", exec);
+			say_errno();
+			return;
+		}
+
+		// NOTE: cannot reach here
+	}
+	else if (newpid < 0)
+	{
+		error("Failed to fork!!\n");
+		say_errno();
+		return;
+	}
+	else
+	{
+		// to read from cgi, we need check fromcgi[0]
+		while(1)
+		{
+			char buff[128];
+//			debug("Pipe reading...\n");
+			int rlen = read(fromcgi[0], buff, sizeof(buff));
+			debug("Pipe %d bytes read:\n", rlen);
+
+//			debug("...%d bytes read\n", rlen);
+			int i = 0;
+			for (i = 0; i < rlen; i ++)
+				printf("%c", buff[i]);
+			printf("(end)\n");
+		}
+
+		// TODO: waitpid??
+	}
+
+	// TODO: such close pipe is OK??? how about in forked process??
+	close(to_fd);
+	close(from_fd);
+
+	debug("-------------------- cgi completed!!\n\n");
+}
+
+// *******************************************************************
 extern char** envlist_init(); // NOTE: (on MACOS??) it's MANDATORY;otherwise, it will crash when to read it here. WHY????????????
 
 void construct_msg(const char* msg, int msglen) // TODO: design a "listner" mechanism??? to notify, such as HTTP coming event
@@ -49,6 +168,9 @@ void construct_msg(const char* msg, int msglen) // TODO: design a "listner" mech
 	}
 
 	envlist_dump(envlist, envlist_num());
+
+	// run cgi
+	run_cgi(envlist);
 }
 
 // *******************************************************************
@@ -252,9 +374,16 @@ int main (int argc, char* argv[], char* envp[])
 				closesock(&trans);
 				exit(0);
 			}
+			else if (pid < 0)
+			{
+				error("Failed to fork to accept!!\n");
+				say_errno();
+			}
 			else
 			{
 				debug("After fork, Server parent pid=%d (accept) continues\n", getpid());
+
+				// TODO: waitpid??
 
 				// TODO end the zombie
 				// TOOD: close any fd, especially client-fd???
