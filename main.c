@@ -127,7 +127,7 @@ void run_cgi(char* envp[])
 // *******************************************************************
 extern char** envlist_init(); // NOTE: (on MACOS??) it's MANDATORY;otherwise, it will crash when to read it here. WHY????????????
 
-void construct_msg(const char* msg, int msglen) // TODO: design a "listner" mechanism??? to notify, such as HTTP coming event
+void submit_msg(const char* msg, int msglen) // TODO: design a "listner" mechanism??? to notify, such as HTTP coming event
 {
 	debug("A new message constructed:\n");
 	if ((msg == NULL) || (msglen <= 0))
@@ -189,11 +189,13 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 	int totalrecv;
 
 	debug("Start to receive at trans=%d\n", conn_fd);
-	while (1)
+
+	//while (1) // NOTE: one-time receive for one connetion(accepted)
 	{
 #ifdef TEST_SEND_STRESS
 		sleep(give_random(10));
 #endif // for Stress not sleep always - i think it simulates an actual env.
+
 		totalrecv = 0;
 
 		do
@@ -204,7 +206,7 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 				debug("End receive task, len=%d\n", len);
 
 				if (totalrecv > 0) // ever received - in case of that "totalrecv % bufflen == 0"
-					construct_msg(totalmsg, totalrecv); // Submit received bytes
+					submit_msg(totalmsg, totalrecv); // Submit received bytes
 				return;
 			}
 			else if (len < 0)
@@ -232,7 +234,7 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 		} while (len == bufflen); // MOSTLY there're still bytes remaind in kernel
 
 		// Submit received bytes
-		construct_msg(totalmsg, totalrecv);
+		submit_msg(totalmsg, totalrecv);
 	}
 }
 
@@ -257,7 +259,7 @@ int main (int argc, char* argv[], char* envp[])
 		int len = strlen(str)+1;
 		char * s = malloc(len);
 		memcpy(s, str, len);
-		construct_msg(s, len);
+		submit_msg(s, len);
 
 		return 1;
 	}
@@ -349,6 +351,31 @@ int main (int argc, char* argv[], char* envp[])
 	}
 	else // standby for next connection
 	{
+
+/* --------------------------------------------------
+The core logical processing:
+
+   main
+    |
+->accept
+|   |
+|   |fork
+|___|  \
+        \
+        recv
+         |
+       submit
+         |
+         |fork
+         |  \
+         |   \
+         |    \----"cgi"
+         |           |
+     ->read <-pipe- stdin
+     |   |
+     |___|
+
+-------------------------------------------------- */
 		while (1)
 		{
 			int err = acceptsock(&trans);
