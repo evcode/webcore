@@ -33,7 +33,7 @@
 #include <unistd.h> // for pipe(), dup, etc
 					// + STDIN_FILENO、STDOUT_FILENO and STDERR_FILENO
 
-void run_cgi(char* envp[])
+void cgi_run(char* envp[])
 {
 	int tocgi[2]; // server channels to cgi
 	int fromcgi[2]; // cgi channels to server
@@ -81,8 +81,9 @@ void run_cgi(char* envp[])
 		//dup2(fromcgi[0], STDIN_FILENO);
 
 		/*
-			from here, all STDIN called below will be sent over pipe!!
-			hence, printf should not be called anymore to avoid "waste" info. sent
+			hereafter all STDIN input in Child will be redirected into pipe!!
+			hence, printf for Debug is forbidden to avoid garbage info. sent
+			, except that's just your expectation
 		*/
 
 		char* exec = "cgi/cgi";
@@ -90,8 +91,8 @@ void run_cgi(char* envp[])
 		int exe = execve(exec, argv, envp);
 		if (exe < 0)
 		{
-			//error("Failed to execute <%s>!!\n", exec);
-			//say_errno();
+			error("Failed to execute <%s>!!\n", exec);
+			say_errno();
 			return;
 		}
 
@@ -137,4 +138,11 @@ void run_cgi(char* envp[])
 	close(from_fd);
 
 	debug("-------------------- cgi completed!!\n\n");
+}
+
+void cgi_response(char* s)
+{
+	// TODO: "s" as http/non-http data read from cgi to send to browser
+
+	fflush(stdout); // TODO: maybe added in cgi program??? NO NEED HERE
 }

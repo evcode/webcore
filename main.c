@@ -49,7 +49,7 @@ void submit_msg(const char* msg, int msglen) // TODO: design a "listner" mechani
 	envlist_dump(envlist, envlist_num());
 
 	// run cgi
-	run_cgi(envlist);
+	cgi_run(envlist);
 }
 
 // *******************************************************************
