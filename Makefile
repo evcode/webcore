@@ -24,11 +24,11 @@ $(TARGET):$(OBJS)
 	$(Q)$(CC) $(LDFLAGS) $^ -o $@ -lpthread
 	@echo "Done"
 
-clean:
-	rm -f $(TARGET)
+cleano:
 	find . -name '*.o'|xargs rm -f
 
-	rm -f ./cgi/cgi
+clean:cleano
+	rm -f $(TARGET)
 
 %.o:%.c
 	@echo ""
@@ -43,6 +43,16 @@ dump:
 	@echo "OBJS=$(OBJS)"
 	@echo "CFLAGS=$(CFLAGS)"
 
+#
+# cgi
+#
+
 .PHONY:cgi
 cgi:
 	cd cgi/;gcc -o cgi cgi.c
+
+cleancgi:cleano
+	rm -f ./cgi/cgi
+
+cleanall:clean cleancgi
+	@echo "All cleaned"

@@ -41,10 +41,6 @@
 
 void run_cgi(char* envp[])
 {
-	debug("++++++++++++++++++++ Start to run cgi...\n");
-#define PIPE_READ  0
-#define PIPE_WRITE 1
-
 	int tocgi[2]; // server channels to cgi
 	int fromcgi[2]; // cgi channels to server
 
@@ -59,7 +55,7 @@ void run_cgi(char* envp[])
 		say_errno();
 		return;
 	}
-	int from_fd = pipe(fromcgi);//pipe2(fromcgi, O_NONBLOCK);
+	int from_fd = pipe(fromcgi);//pipe2(fromcgi, O_NONBLOCK);// now MACOS has no pipe2, replace to use fcntl
 	if (from_fd < 0)
 	{
 		error("Failed to pipe!!\n");
@@ -67,10 +63,22 @@ void run_cgi(char* envp[])
 		return;
 	}
 
+	fcntl(from_fd, F_GETFL, O_NONBLOCK); // "asyn" I/O
+
 	// Execute CGI
+	debug("++++++++++++++++++++ cgi calling...\n");
+
 	pid_t newpid = fork();
+	if (newpid < 0)
+	{
+		error("Failed to fork!!\n");
+		say_errno();
+		return;
+	}
+
 	if (newpid == 0)
 	{
+
 		// redirect stdout of new execution - 
 		// it means cgi "printf" will write into fromcgi[1]
 		close(STDOUT_FILENO);
@@ -79,39 +87,53 @@ void run_cgi(char* envp[])
 		close(STDIN_FILENO);
 		//dup2(fromcgi[0], STDIN_FILENO);
 
+		/*
+			from here, all STDIN called below will be sent over pipe!!
+			hence, printf should not be called anymore to avoid "waste" info. sent
+		*/
+
 		char* exec = "cgi/cgi";
-		char* argv[] = {"cgi"};
+		char* argv[] = {"cgi", NULL}; // NOTE: on MACOS "argv" also must be NULL as tail
 		int exe = execve(exec, argv, envp);
 		if (exe < 0)
 		{
-			error("Failed to execute <%s>!!\n", exec);
-			say_errno();
+			//error("Failed to execute <%s>!!\n", exec);
+			//say_errno();
 			return;
 		}
 
 		// NOTE: cannot reach here
 	}
-	else if (newpid < 0)
-	{
-		error("Failed to fork!!\n");
-		say_errno();
-		return;
-	}
 	else
 	{
-		// to read from cgi, we need check fromcgi[0]
-		while(1)
-		{
-			char buff[128];
-//			debug("Pipe reading...\n");
-			int rlen = read(fromcgi[0], buff, sizeof(buff));
-			debug("Pipe %d bytes read:\n", rlen);
+		// To read from cgi, we need check fromcgi[0]
+		char buff[128];
+		int bufflen = sizeof(buff);
+		int rlen;
+		int to = 5, per = 100; // set 5*100 TO to wait "cgi" responding
 
-//			debug("...%d bytes read\n", rlen);
-			int i = 0;
+		// Codes below aims to "asyn" I/O as per "O_NONBLOCK" set above
+		while (((rlen = read(fromcgi[0], buff, bufflen)) <= 0) && (to)) // continuus reading until TO
+		{
+			usleep(per); // sleep for next try reading
+			to --;
+		}
+		// dump
+		int i = 0;
+		for (i = 0; i < rlen; i ++)
+			printf("%c", buff[i]);
+		printf("(end)\n");
+
+		while (rlen == bufflen) // if just read fully, continue to read until cannnot read anymore
+		{
+			rlen = read(fromcgi[0], buff, bufflen);
+			// dump
+			i = 0;
 			for (i = 0; i < rlen; i ++)
 				printf("%c", buff[i]);
 			printf("(end)\n");
+
+			// TODO: any sleep here??? to release timeslice
 		}
 
 		// TODO: waitpid??
@@ -371,9 +393,7 @@ The core logical processing:
          |   \
          |    \----"cgi"
          |           |
-     ->read <-pipe- stdin
-     |   |
-     |___|
+       read <-pipe- stdin
 
 -------------------------------------------------- */
 		while (1)
