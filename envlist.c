@@ -119,12 +119,13 @@ BOOL envlist_add(const char* str)
 
 void envlist_dump(char** e, int l)
 {
+	debug("----------------------------------\n");
 	debug("Environment variants:\n");
 	int i;
 	for (i = 0; i < l; i ++)
 	{
-		printf("%s\n", e[i]);
+		debug("%s\n", e[i]);
 	}
-	printf("\n");
+	debug("\n");
 }
 // TODO: release all
