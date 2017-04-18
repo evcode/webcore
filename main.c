@@ -22,6 +22,7 @@ void submit_msg(const char* msg, int msglen) // TODO: design a "listner" mechani
 	printf("(end)\n");
 #endif
 
+	// construct env. variant retrieved from "msg"
 	char** envlist = envlist_init();
 
 	int envstart = 0;
@@ -114,7 +115,22 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 
 		// Submit received bytes
 		submit_msg(totalmsg, totalrecv);
+
+		//trans_send(conn_fd);
 	}
+}
+
+void trans_send(int conn_fd, const char* buff, int len)
+{
+	int slen = send(conn_fd, buff, len, 0);// TODO: flags
+	if (slen != len)
+	{
+		error("Failed to send, err=%d\n", len);
+		say_errno();
+		return -3;
+	}
+
+	debug("pid=%d Server sent %d bytes>>\n", getpid(), len);
 }
 
 // *******************************************************************
@@ -230,28 +246,6 @@ int main (int argc, char* argv[], char* envp[])
 	}
 	else // standby for next connection
 	{
-/* --------------------------------------------------
-The core logical processing:
-
-   main
-    |
-->accept
-|   |
-|   |fork
-|___|  \
-        \
-        recv
-         |
-       submit
-         |
-         |fork
-         |  \
-         |   \
-         |    \----"cgi"
-         |           |
-       read <-pipe- stdin
-
--------------------------------------------------- */
 		while (1)
 		{
 			int err = acceptsock(&trans);

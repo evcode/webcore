@@ -1,0 +1,24 @@
+
+/* --------------------------------------------------
+The core logical processing:
+
+   main
+    |
+->accept
+|   |
+|   |fork
+|___|  \
+        \
+        recv:  <<<<<<<<<<<<<<<<<<<< Client request
+         |
+       submit
+         |
+         |fork
+         |  \
+         |   \-----"cgi"
+         |           |
+       read <-pipe- stdin
+         |
+       send:  >>>>>>>>>>>>>>>>>>>>> respond Client
+
+-------------------------------------------------- */
