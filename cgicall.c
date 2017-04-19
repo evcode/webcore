@@ -1,13 +1,14 @@
 #include "util.h"
 
-void cgi_response(char* s, unsigned int n)
+static int response_id = -1;
+static void (*response_cb)(int, int, char*, int) = NULL;
+
+/* @"msg": as http/non-http data read from cgi to send to browser
+*/
+void cgi_listen(int id, void(*cb)(int id, int err, char* msg, int len))
 {
-	// TODO: "s" as http/non-http data read from cgi to send to browser
-	debug("cgi response:\n");
-	int i;
-	for (i = 0; i < n; i ++)
-		printf("%c", s[i]);
-	printf("(end)\n");
+	response_id = id;
+	response_cb = cb;
 
 	//fflush(stdout); // TODO: maybe added in cgi program??? NO NEED HERE
 }
@@ -50,9 +51,9 @@ void cgi_run(char* envp[])
 	int tocgi[2]; // server channels to cgi
 	int fromcgi[2]; // cgi channels to server
 
-    /* Create the full-duplex pipes:
-    miniWeb (w tocgi[1])------------->>(r tocgi[0])   cgi
-    miniWeb (r fromcgi[0])<<-----------(w fromcgi[1]) cgi
+    /* Create the full-duplex pipes (now "fromcgi" only should be enough):
+    miniweb (w tocgi[1])------------->>(r tocgi[0])   cgi
+    miniweb (r fromcgi[0])<<-----------(w fromcgi[1]) cgi
     */
 	int to_fd = pipe(tocgi);
 	if (to_fd < 0)
@@ -82,7 +83,7 @@ void cgi_run(char* envp[])
 		return;
 	}
 
-	if (newpid == 0)
+	if (newpid == 0) // child: cgi execution
 	{
 		// redirect stdout of new execution - 
 		// it means cgi "printf" will write into fromcgi[1]
@@ -110,7 +111,7 @@ void cgi_run(char* envp[])
 
 		// NOTE: cannot reach here
 	}
-	else
+	else // parent: pipe receive
 	{
 		#define CGI_RESPONSE_LEN 256
 		char* totalread = malloc(CGI_RESPONSE_LEN);
@@ -162,8 +163,9 @@ void cgi_run(char* envp[])
 		}
 
 		// reading done, and respond it
-		if (totaloff > 0)
-			cgi_response(totalread, totaloff);
+		if ((totaloff > 0) && 
+			response_cb && (response_id >= 0))
+			response_cb(response_id, 0, totalread, totaloff); // TODO: if cb inside is BLOCKING, efficiency is low!! Improve
 
 		free(totalread);
 

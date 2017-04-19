@@ -6,9 +6,43 @@
 
 extern char** envlist_init(); // NOTE: (on MACOS??) it's MANDATORY;otherwise, it will crash when to read it here. WHY????????????
 
-void submit_msg(const char* msg, int msglen) // TODO: design a "listner" mechanism??? to notify, such as HTTP coming event
+void respond(int fd, int err, char* s, int n)
 {
-	debug("A new message constructed:\n");
+	debug("To respond at fd=%d:\n", fd);
+	if (fd < 0) // TODO: check "err"
+		return;
+
+	int i;
+	for (i = 0; i < n; i ++)
+		printf("%c", s[i]);
+	printf("(end)\n");
+
+	debug("1\n");
+	char* html_format ="<!DOCTYPE HTML>\r\n<html>\r\n";
+	//n = strlen(html_format);
+	send(fd, html_format, strlen(html_format), 0);
+#if 1
+	debug("2\n");
+	int len = send(fd, s, n, 0); // TODO: flags
+
+	debug("3\n");
+	html_format ="\r\n</html>\r\n";
+	send(fd, html_format, strlen(html_format), 0);
+	debug("4\n");
+#endif
+	if (len != n)
+	{
+		error("Failed to send, err=%d\n", len);
+		say_errno();
+		return -3;
+	}
+
+	debug("pid=%d Server responds %d bytes>>\n", getpid(), len);
+}
+
+void request(int fd, const char* msg, int msglen) // TODO: design a "listner" mechanism??? to notify, such as HTTP coming event
+{
+	debug("To request:\n");
 	if ((msg == NULL) || (msglen <= 0))
 	{
 		error("Bad parameters!!\n");
@@ -37,7 +71,7 @@ void submit_msg(const char* msg, int msglen) // TODO: design a "listner" mechani
 				memcpy(envstr, msg + envstart, envlen);
 				envstr[envlen] = '\0';
 
-				envlist_add(envstr);
+				envlist_add(envstr); // TODO: one more param for "envlist"
 
 				free(envstr);
 				envstr = NULL;
@@ -50,7 +84,11 @@ void submit_msg(const char* msg, int msglen) // TODO: design a "listner" mechani
 	envlist_dump(envlist, envlist_num());
 
 	// run cgi
-	cgi_run(envlist);
+	if (envlist[0] != NULL) // 1st one is NULL, means no env variant
+	{
+		cgi_listen(fd, respond);
+		cgi_run(envlist); // TODO: now it directly cb "respond", so still "syn" call! Improve!!
+	}
 }
 
 // *******************************************************************
@@ -59,7 +97,7 @@ void submit_msg(const char* msg, int msglen) // TODO: design a "listner" mechani
 #define TRANS_RECVBUF_SIZE 120
 #define TRANS_SENDBUF_SIZE (TRANS_RECVBUF_SIZE+8)
 
-void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd"???
+void transact(int conn_fd) // TODO: transfer a Trans struct not just a "fd"???
 {
 	char transrecv[TRANS_RECVBUF_SIZE];
 	int bufflen = sizeof(transrecv), len;
@@ -70,7 +108,8 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 
 	debug("Start to receive at trans=%d\n", conn_fd);
 
-	//while (1) // NOTE: one-time receive for one connetion(accepted)
+	//while (1)
+	// NOTE: one-time receive for one connetion(accepted) - "while" just for TEST
 	{
 #ifdef TEST_SEND_STRESS
 		sleep(give_random(10));
@@ -80,6 +119,7 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 
 		do
 		{
+			//debug("Receiving...\n"); // to check the blocking
 			len = recv(conn_fd, transrecv, bufflen, 0);// TODO: flags,        TODO: remove "transrecv" - direclty recv into "totalmsg"
 			if (len == 0) // return 0, for TCP, means the peer has closed its half side of the connection
 			{
@@ -113,22 +153,10 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 
 		// Submit received bytes
 		if (totalrecv > 0)
-			submit_msg(totalmsg, totalrecv);
+		{
+			request(conn_fd, totalmsg, totalrecv);
+		}
 	}
-}
-
-int trans_send(int conn_fd, const char* buff, int len)
-{
-	int slen = send(conn_fd, buff, len, 0);// TODO: flags
-	if (slen != len)
-	{
-		error("Failed to send, err=%d\n", len);
-		say_errno();
-		return -3;
-	}
-
-	debug("pid=%d Server sent %d bytes>>\n", getpid(), len);
-	return 0;
 }
 
 // *******************************************************************
@@ -152,7 +180,7 @@ int main (int argc, char* argv[], char* envp[])
 		int len = strlen(str)+1;
 		char * s = malloc(len);
 		memcpy(s, str, len);
-		submit_msg(s, len);
+		request(s, len);
 
 		return 1;
 	}
@@ -255,13 +283,13 @@ int main (int argc, char* argv[], char* envp[])
 			// Another new task created to receive the requests...
 #if 0
 			// NOTE: "conn_end->conn_fd" is just the new accepted Client
-			new_task(trans_recvtask, trans.conn_end->conn_fd);
+			new_task(transact, trans.conn_end->conn_fd);
 #else
 			int pid = fork();
 			if (pid == 0)
 			{
 				debug("After fork, Server child pid=%d (recv) continues\n", getpid());
-				trans_recvtask(trans.conn_end->conn_fd);
+				transact(trans.conn_end->conn_fd);
 				debug("--> Server pid=%d recvtask ends\n\n", getpid());
 
 				/* NOTE: child (client) ends, so must exit;

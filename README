@@ -11,13 +11,15 @@ The core logical processing:
         \
         recv:  <<<<<<<<<<<<<<<<<<<< Client request
          |
-       submit
+      request
          |
          |fork
          |  \
          |   \-----"cgi"
          |           |
        read <-pipe- stdin
+         |
+      respond
          |
        send:  >>>>>>>>>>>>>>>>>>>>> respond Client
 
