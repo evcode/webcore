@@ -3,8 +3,13 @@
 void cgi_response(char* s, unsigned int n)
 {
 	// TODO: "s" as http/non-http data read from cgi to send to browser
+	debug("cgi response:\n");
+	int i;
+	for (i = 0; i < n; i ++)
+		printf("%c", s[i]);
+	printf("(end)\n");
 
-	fflush(stdout); // TODO: maybe added in cgi program??? NO NEED HERE
+	//fflush(stdout); // TODO: maybe added in cgi program??? NO NEED HERE
 }
 
 /*
@@ -109,65 +114,49 @@ void cgi_run(char* envp[])
 	{
 		#define CGI_RESPONSE_LEN 256
 		char* totalread = malloc(CGI_RESPONSE_LEN);
-		unsigned int totaloff = 0, n = 1;
+		unsigned int totaloff = 0, n = 1, remaining;
+		unsigned int rlen;
 
-		// To read from cgi, we need check fromcgi[0]
-		char buff[128];
-		int bufflen = sizeof(buff);
-		int rlen;
 		int to = 5, per = 100; // set 5*100 TO to wait "cgi" responding
 
 		/*
 			TODO: any optimization can do below?!
 			, espeically for malloc, wait-read??????????
-			and, duplicate codes: memcpy+realloc - improve it
+			and, duplicate codes: memcpy+realloc - improve it!!!!!
 		*/
 		totaloff = 0;
 		n = 1; //  count of "realloc"
+
 		// Codes below aims to "asyn" I/O as per "O_NONBLOCK" set above
+		// TOOD: double review the codes as below!!!!!
 
 		// continous reading until TO
-		while (((rlen = read(fromcgi[0], buff, bufflen)) <= 0) && (to))
+		remaining = n*CGI_RESPONSE_LEN-totaloff;
+		while (((rlen = read(fromcgi[0], totalread+totaloff, remaining)) <= 0) && (to))
 		{
 			usleep(per); // sleep for next try reading
 			to --;
 		}
-		if (rlen > 0) // TODO: double check the case exceeds the range!!
+		if (rlen > 0)
 		{
-			memcpy(totalread+totaloff, buff, rlen);
 			totaloff += rlen;
-			if (totaloff >= n*CGI_RESPONSE_LEN) // if read exceeds the buffer
-			{
-				n ++; // for new increase of buffsize
-				totalread = realloc(totalread, n*CGI_RESPONSE_LEN);
-			}
+			remaining-= rlen;
 		}
-		// dump
-		int i = 0;
-		for (i = 0; i < rlen; i ++)
-			printf("%c", buff[i]);
-		printf("(end)\n");
 
 		// if just read fully, continue to read until cannnot read anymore
-		while (rlen == bufflen)
+		while (0 == remaining)
 		{
-			rlen = read(fromcgi[0], buff, bufflen);
+			n ++;
+			totalread = realloc(totalread, n*CGI_RESPONSE_LEN);
+			debug("realloc more=%d\n", n*CGI_RESPONSE_LEN);
+
+			remaining = n*CGI_RESPONSE_LEN-totaloff;
+			rlen = read(fromcgi[0], totalread+totaloff, remaining);
 			if (rlen > 0)
 			{
-				memcpy(totalread+totaloff, buff, rlen);
-				// TODO: !!! here may out-of-range, "rlen" needs check with the remaining size
 				totaloff += rlen;
-				if (totaloff >= n*CGI_RESPONSE_LEN)
-				{
-					n ++;
-					totalread = realloc(totalread, n*CGI_RESPONSE_LEN);
-				}
+				remaining-= rlen;
 			}
-			// dump
-			i = 0;
-			for (i = 0; i < rlen; i ++)
-				printf("%c", buff[i]);
-			printf("(end)\n");
 
 			// TODO: any sleep here??? to release timeslice
 		}

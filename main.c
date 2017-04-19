@@ -80,14 +80,12 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 
 		do
 		{
-			len = recv(conn_fd, transrecv, bufflen, 0);// TODO: flags
+			len = recv(conn_fd, transrecv, bufflen, 0);// TODO: flags,        TODO: remove "transrecv" - direclty recv into "totalmsg"
 			if (len == 0) // return 0, for TCP, means the peer has closed its half side of the connection
 			{
 				debug("End receive task, len=%d\n", len);
 
-				if (totalrecv > 0) // ever received - in case of that "totalrecv % bufflen == 0"
-					submit_msg(totalmsg, totalrecv); // Submit received bytes
-				return;
+				break; // not "return": perhapse ever received - in case "totalrecv % bufflen == 0"
 			}
 			else if (len < 0)
 			{
@@ -111,16 +109,15 @@ void trans_recvtask(int conn_fd) // TODO: transfer a Trans struct not just a "fd
 			}
 			memcpy(totalmsg+totalrecv, transrecv, len);
 			totalrecv += len;
-		} while (len == bufflen); // MOSTLY there're still bytes remaind in kernel
+		} while (len == bufflen); // MOSTLY there're still bytes remained in kernel buff
 
 		// Submit received bytes
-		submit_msg(totalmsg, totalrecv);
-
-		//trans_send(conn_fd);
+		if (totalrecv > 0)
+			submit_msg(totalmsg, totalrecv);
 	}
 }
 
-void trans_send(int conn_fd, const char* buff, int len)
+int trans_send(int conn_fd, const char* buff, int len)
 {
 	int slen = send(conn_fd, buff, len, 0);// TODO: flags
 	if (slen != len)
@@ -131,6 +128,7 @@ void trans_send(int conn_fd, const char* buff, int len)
 	}
 
 	debug("pid=%d Server sent %d bytes>>\n", getpid(), len);
+	return 0;
 }
 
 // *******************************************************************
