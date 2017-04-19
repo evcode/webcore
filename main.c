@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "trans.h"
 #include "util.h"
 
 extern char** envlist_init(); // NOTE: (on MACOS??) it's MANDATORY;otherwise, it will crash when to read it here. WHY????????????
@@ -17,24 +18,32 @@ void respond(int fd, int err, char* s, int n)
 		printf("%c", s[i]);
 	printf("(end)\n");
 
-	debug("1\n");
-	char* html_format ="<!DOCTYPE HTML>\r\n<html>\r\n";
-	//n = strlen(html_format);
-	send(fd, html_format, strlen(html_format), 0);
-#if 1
-	debug("2\n");
+	// status-line
+	char* html_field="HTTP/1.1 200 OK\r\n";
+	send(fd, html_field, strlen(html_field), 0);
+
+	// respond-header
+	html_field="Server: miniweb\r\nContent-Type: text/html; charset=utf-8\r\n";
+	send(fd, html_field, strlen(html_field), 0);
+	// "CONTENT_LENGTH" not mandatory???
+
+	// content body
+	char* html_format = "\r\n"; // content starts here, seems not mandatory???
+	//send(fd, html_format, strlen(html_format), 0);
+
+	html_format = "<!DOCTYPE HTML>\r\n<html>\r\n"; // seems not mandatory???
+	//send(fd, html_format, strlen(html_format), 0);
+
 	int len = send(fd, s, n, 0); // TODO: flags
 
-	debug("3\n");
-	html_format ="\r\n</html>\r\n";
-	send(fd, html_format, strlen(html_format), 0);
-	debug("4\n");
-#endif
+	html_format ="</html>\r\n"; // seems not mandatory???
+	//send(fd, html_format, strlen(html_format), 0);
+	
 	if (len != n)
 	{
 		error("Failed to send, err=%d\n", len);
 		say_errno();
-		return -3;
+		return;
 	}
 
 	debug("pid=%d Server responds %d bytes>>\n", getpid(), len);
@@ -92,7 +101,6 @@ void request(int fd, const char* msg, int msglen) // TODO: design a "listner" me
 }
 
 // *******************************************************************
-#include "trans.h"
 
 #define TRANS_RECVBUF_SIZE 120
 #define TRANS_SENDBUF_SIZE (TRANS_RECVBUF_SIZE+8)
