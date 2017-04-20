@@ -57,6 +57,9 @@ void dumpsock(int fd)
 	getsockopt(fd, SOL_SOCKET, SO_SNDBUF, &otpvalue, &optlen);
 	debug("SO_SNDBUF:%d\n", otpvalue);
 
+	getsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &otpvalue, &optlen);
+	debug("SO_REUSEADDR:%d\n", otpvalue);
+
 	getsockopt(fd, IPPROTO_IP, TCP_NODELAY, &otpvalue, &optlen);
 	debug("TCP_NODELAY:%d\n", otpvalue);
 #ifdef MACOS
@@ -136,6 +139,8 @@ int opensock(TRANS_TYPE type, Transaction* trans)
 	setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &optvalue, sizeof(optvalue));
 	optvalue = 500;
 	setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &optvalue, sizeof(optvalue));
+	optvalue = 1; // NOTE: fix "address in use" due to TIME_WAIT
+	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &optvalue, sizeof(optvalue));
 	optvalue = 1;
 	setsockopt(fd, IPPROTO_IP, TCP_NODELAY, &optvalue, sizeof(optvalue));
 

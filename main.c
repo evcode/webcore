@@ -28,17 +28,11 @@ void respond(int fd, int err, char* s, int n)
 	// "CONTENT_LENGTH" not mandatory???
 
 	// content body
-	char* html_format = "\r\n"; // content starts here, seems not mandatory???
-	//send(fd, html_format, strlen(html_format), 0);
-
-	html_format = "<!DOCTYPE HTML>\r\n<html>\r\n"; // seems not mandatory???
-	//send(fd, html_format, strlen(html_format), 0);
+	char* html_format = "\r\n"; // content starts here - Mandatory
+								// ,for some format, without webpage cannot identify
+	send(fd, html_format, strlen(html_format), 0);
 
 	int len = send(fd, s, n, 0); // TODO: flags
-
-	html_format ="</html>\r\n"; // seems not mandatory???
-	//send(fd, html_format, strlen(html_format), 0);
-	
 	if (len != n)
 	{
 		error("Failed to send, err=%d\n", len);
@@ -296,6 +290,11 @@ int main (int argc, char* argv[], char* envp[])
 			int pid = fork();
 			if (pid == 0)
 			{
+				/*
+					NOTE: in Chind process do close the unnessary "fd"
+				*/
+				close(trans.trans_fd);
+
 				debug("After fork, Server child pid=%d (recv) continues\n", getpid());
 				transact(trans.conn_end->conn_fd);
 				debug("--> Server pid=%d recvtask ends\n\n", getpid());
