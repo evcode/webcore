@@ -225,7 +225,7 @@ int acceptsock(Transaction* trans)
 		return -2;
 	}
 
-	debug("--> New comming trans=%d (%s:%d)\n", cli_fd, 
+	debug("--> New comming conn=%d (%s:%d)\n", cli_fd,
 		inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port));
 	dumpsock(cli_fd);
 
@@ -288,4 +288,231 @@ int connectsock(Transaction* trans, const char* str)
 void closesock(Transaction* trans)
 {
 // TODO: fix me
+
+	debug("(FIX ME!!)Closed the trans=%d!! pid=%d to exit!!\n",
+		trans->trans_fd, getpid());
+}
+
+// *******************************************************************
+#define TRANS_RECVBUF_SIZE 120
+#define TRANS_SENDBUF_SIZE (TRANS_RECVBUF_SIZE+8)
+
+static char* eventnames[] = {"NEW CONNECTION", "INCOMING MSG","ON DISCONNECT"};
+
+char* get_eventname(TransEvent evt)
+{
+	if (evt >= TransEvent_UNKNOWN)
+		return "unknown-event";
+
+	return eventnames[evt];
+}
+
+static void (*notify_newevent)(TransEvent, TransConn*, char*, unsigned int) = NULL;
+
+void trans_addlisten(void (*cb)(TransEvent, TransConn*, char*, unsigned int))
+{
+	notify_newevent = cb;
+}
+
+void transact(TransConn *conn)
+{
+	int conn_fd = conn->conn_fd;
+
+	char transrecv[TRANS_RECVBUF_SIZE];
+	int bufflen = sizeof(transrecv), len;
+#define TOTOAL_MSG_LEN 1500
+	char totalmsg[TOTOAL_MSG_LEN]; // TODO: replace with realloc(), or direclty apply it to "transrecv" - char* transrecv;
+	int totalrecv;
+
+	debug("Start to receive at conn=%d\n", conn_fd);
+
+	//while (1)
+	// NOTE: one-time receive for one connetion(accepted) - "while" just for TEST
+	{
+#ifdef TEST_SEND_STRESS
+		sleep(give_random(10));
+#endif // for Stress not sleep always - i think it simulates an actual env.
+
+		totalrecv = 0;
+
+		do
+		{
+			//debug("Receiving...\n"); // to check the blocking
+			len = recv(conn_fd, transrecv, bufflen, 0);// TODO: flags,        TODO: remove "transrecv" - direclty recv into "totalmsg"
+			if (len == 0) // return 0, for TCP, means the peer has closed its half side of the connection
+			{
+				debug("End receive task, len=%d\n", len);
+
+				break; // not "return": perhapse ever received - in case "totalrecv % bufflen == 0"
+			}
+			else if (len < 0)
+			{
+				error("Failed to receive, err=%d\n", len);
+				say_errno();
+				return;
+			} // TODO: len > bufflen, possible????
+
+			debug("pid=%d Server receive %d bytes<<\n", getpid(), len);
+/*			int i;
+			for (i = 0; i < len; i++)
+				printf("%c", transrecv[i]);
+			//printf("%s", transrecv);
+			printf("(end)\n");
+*/
+			// Bufffering
+			if (totalrecv >= TOTOAL_MSG_LEN)
+			{
+				error("Too large message requested!!\n");
+				return;
+			}
+			memcpy(totalmsg+totalrecv, transrecv, len);
+			totalrecv += len;
+		} while (len == bufflen); // MOSTLY there're still bytes remained in kernel buff
+
+		// Submit received bytes
+		if (totalrecv > 0)
+		{
+			if (notify_newevent)
+				notify_newevent(TransEvent_INCOMING_MSG,
+					conn, totalmsg, totalrecv);
+		}
+	}
+}
+
+void send_stress(Transaction trans)
+{
+	char transsnd[TRANS_SENDBUF_SIZE];
+	int bufflen = sizeof(transsnd), len;
+
+	while (1)
+	{
+		memset(transsnd, 'c', sizeof(transsnd));
+
+		sprintf(transsnd, "Client xxx:xx says:"); // TODO: add local IP:port
+		strcat(transsnd, curr_timestr());
+
+#ifdef TEST_SEND_STRESS
+		debug("Sending...\n"); // to check the blocking
+#endif
+		len = send(trans.trans_fd, transsnd, bufflen, 0);// TODO: flags
+		if (len != bufflen)
+		{
+			error("Failed to send, err=%d\n", len);
+			say_errno();
+			return -3;
+		}
+
+		debug("pid=%d Client sent %d bytes>>\n", getpid(), len);
+/*			int i;
+		for (i = 0; i < len; i ++)
+			printf("%c", transsnd[i]);
+		//printf("%s", transsnd);
+		printf("(end)\n");
+*/
+#ifdef TEST_SEND_STRESS
+		// not sleep to keep sending until next blocking
+#else
+		sleep(give_random(5)); // sleep a random sec from 1 to 5
+#endif
+	}
+}
+
+void trans_start(int mode, char* dst) // mode "0" means Server
+{
+/*
+	Transaction init
+*/
+	Transaction trans;
+	memset(&trans, 0, sizeof(Transaction));
+
+	opensock(TRANS_TCP, &trans);
+	if (mode)
+	{
+		trans.trans_mode = 1; // non-zero value means Client
+//TODO: NOW the code can work!! Go to get local port from cmdline
+//		if (bindsock(&trans, "127.0.0.1:9002") !=0 ) // NOTE: +bind() to use the dedicated port
+//			return -2;
+
+		if (connectsock(&trans, dst) != 0) // TODO: test the case not on local
+			return -2;
+	}
+	else // server mode
+	{
+		if (bindsock(&trans, dst) != 0)
+			return -2;
+
+		if (listensock(&trans) != 0)
+			return -2;
+	}
+
+/*
+	Here we go
+*/
+	if (trans.trans_mode) // the transaction is requesting
+	{
+		send_stress(trans);
+	}
+	else // standby for next connection
+	{
+		while (1)
+		{
+			int err = acceptsock(&trans);
+			if (err != 0)
+			{
+				return -3;
+			}
+
+			// Another new task created to receive the requests...
+#if 0
+			// NOTE: "conn_end->conn_fd" is just the new accepted Client
+			new_task(transact, trans.conn_end->conn_fd);
+#else
+			int pid = fork();
+			if (pid == 0)
+			{
+				debug("After fork, Server child pid=%d (recv) continues\n", getpid());
+
+				/*
+					NOTE: in Chind process do close the unnessary "fd"
+				*/
+				close(trans.trans_fd);
+
+				if (notify_newevent)
+					notify_newevent(TransEvent_NEWCONNECTION,
+						trans.conn_end, NULL, 0);
+
+				transact(trans.conn_end);
+
+				if (notify_newevent)
+					notify_newevent(TransEvent_ON_DISCONNECT,
+						trans.conn_end, NULL, 0);
+
+				// not need the "conn" anymore
+				close(trans.conn_end->conn_fd);
+
+				/* NOTE: child (client) ends, so must exit;
+				otherwise the client will loop to next accept(), which not we want */
+				debug("--> Server pid=%d recvtask ends\n\n", getpid());
+				exit(0);
+			}
+			else if (pid < 0)
+			{
+				error("Failed to fork to accept!!\n");
+				say_errno();
+			}
+			else
+			{
+				debug("After fork, Server parent pid=%d (accept) continues\n", getpid());
+
+				// TODO: waitpid??
+
+				// TODO end the zombie
+				// TOOD: close any fd, especially client-fd???
+			}
+#endif
+		}
+	}
+
+	// TODO: RELEASE the resource before leaving (return or exit)!!!
+	closesock(&trans);
 }

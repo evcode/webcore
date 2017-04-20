@@ -5,7 +5,7 @@ static void (*response_cb)(int, int, char*, int) = NULL;
 
 /* @"msg": as http/non-http data read from cgi to send to browser
 */
-void cgi_listen(int id, void(*cb)(int id, int err, char* msg, int len))
+void cgi_addlisten(int id, void(*cb)(int id, int err, char* msg, int len))
 {
 	response_id = id;
 	response_cb = cb;
@@ -110,6 +110,7 @@ void cgi_run(char* envp[])
 		}
 
 		// NOTE: cannot reach here
+		exit(1);
 	}
 	else // parent: pipe receive
 	{

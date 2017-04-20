@@ -168,5 +168,5 @@ void sig_routine(int signum)
 		break;
 	}
 
-	exit(0);
+	exit(0); // TODO: remove it
 }
