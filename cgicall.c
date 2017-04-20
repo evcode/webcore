@@ -1,4 +1,4 @@
-#include "util.h"
+#include "cgicall.h"
 
 static int response_id = -1;
 static void (*response_cb)(int, int, char*, int) = NULL;
@@ -45,6 +45,16 @@ void cgi_addlisten(int id, void(*cb)(int id, int err, char* msg, int len))
 #include <fcntl.h> // + pipe2, and O_*
 #include <unistd.h> // for pipe(), dup, etc
 					// + STDIN_FILENO、STDOUT_FILENO and STDERR_FILENO
+
+static char* cginotify[] = {"NOTIFY OK", "BAD ENV VARIANT", "CGI ERROR", "TIME OUT", "INVALID DATA", "UNKNOWN ERROR"};
+
+char* cgi_get_notifyname(int evt)
+{
+	if (evt >= sizeof(cginotify)/sizeof(cginotify[0]))
+		return "unknown-notify";
+
+	return cginotify[evt];
+}
 
 void cgi_run(char* envp[])
 {
@@ -104,9 +114,9 @@ void cgi_run(char* envp[])
 		int exe = execve(exec, argv, envp);
 		if (exe < 0)
 		{
-			error("Failed to execute <%s>!!\n", exec);
-			say_errno();
-			return;
+			printf(CGI_ERROR); // NOTE: output into pipe - see also below!!
+			//error("Failed to execute <%s>!!\n", exec);
+			//say_errno();
 		}
 
 		// NOTE: cannot reach here
@@ -164,9 +174,24 @@ void cgi_run(char* envp[])
 		}
 
 		// reading done, and respond it
-		if ((totaloff > 0) && 
-			response_cb && (response_id >= 0))
-			response_cb(response_id, 0, totalread, totaloff); // TODO: if cb inside is BLOCKING, efficiency is low!! Improve
+		if (response_cb)
+		{
+			if (totaloff > 0)
+			{
+				if (str_startwith(CGI_ERROR))
+					response_cb(response_id, CGI_NOTIFY_CGI_ERR, totalread, totaloff);
+				else
+					response_cb(response_id, CGI_NOTIFY_OK, totalread, totaloff); // TODO: if cb inside is BLOCKING, efficiency is low!! Improve
+			}
+			else if (to == 0)
+			{
+				response_cb(response_id, CGI_NOTIFY_TIMEOUT, NULL, 0);
+			}
+			else if (totaloff == 0)
+			{
+				response_cb(response_id, CGI_NOTIFY_INVALID_DATA, NULL, 0);
+			}
+		}
 
 		free(totalread);
 
@@ -178,4 +203,46 @@ void cgi_run(char* envp[])
 	close(from_fd);
 
 	debug("-------------------- cgi completed!!\n\n");
+}
+
+void cgi_request(const char* msg, int msglen)
+{
+	int i;
+	// construct env. variant retrieved from "msg"
+	char** envlist = envlist_init();
+
+	int envstart = 0;
+	for (i = 0; i < msglen; i++) // Parse the line one by one
+	{
+		if ((msg[i] == '\r') || (msg[i] == '\n')) // one line ends
+		{
+			int envlen = i - envstart; // not contains '\0'
+			if (envlen > 0) // to avoid that many '\r' or '\n' following together
+			{
+				char* envstr = malloc(envlen + 1); // TODO: any optimization can do here?? - not malloc always
+				memcpy(envstr, msg + envstart, envlen);
+				envstr[envlen] = '\0';
+
+				envlist_add(envstr); // TODO: one more param for "envlist"
+
+				free(envstr);
+				envstr = NULL;
+			}
+
+			envstart = i + 1; // substring to parse starting from next byte
+		}
+	}
+
+	envlist_dump(envlist, envlist_num());
+
+	// run cgi
+	if (envlist[0] != NULL) // 1st one is NULL, means no env variant
+	{
+		cgi_run(envlist); // TODO: now it directly cb "respond", so still "syn" call! Improve!!
+	}
+	else
+	{
+		if (response_cb)
+			response_cb(response_id, CGI_NOTIFY_BAD_ENV, NULL, 0);
+	}
 }

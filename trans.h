@@ -82,11 +82,11 @@ typedef struct trans_struct
 	int backlog; // max backlog for listen()
 } Transaction;
 
-typedef enum
+typedef enum  // TODO: do edit "trans_get_eventname()" if update here!!
 {
 	TransEvent_NEWCONNECTION=0,
 	TransEvent_INCOMING_MSG,
-	TransEvent_ON_DISCONNECT, // TODO: do edit "get_eventname" if update here
+	TransEvent_ON_DISCONNECT,
 
 	TransEvent_UNKNOWN
 } TransEvent;

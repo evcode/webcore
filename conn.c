@@ -3,11 +3,9 @@
 
 extern char** envlist_init(); // NOTE: (on MACOS??) it's MANDATORY;otherwise, it will crash when to read it here. WHY????????????
 
-void respond(int fd, int err, char* s, int n)
+void on_cgi_notified(int fd, int err, char* s, int n)
 {
-	debug("To respond at fd=%d:\n", fd);
-	if (fd < 0) // TODO: check "err"
-		return;
+	debug("On new CGI notified=%s\n", cgi_get_notifyname(err));
 
 	int i;
 	for (i = 0; i < n; i ++)
@@ -39,9 +37,9 @@ void respond(int fd, int err, char* s, int n)
 	debug("pid=%d Server responds %d bytes>>\n", getpid(), len);
 }
 
-void request(int fd, const char* msg, int msglen) // TODO: design a "listner" mechanism??? to notify, such as HTTP coming event
+void request_cgi(int fd, const char* msg, int msglen) // TODO: design a "listner" mechanism??? to notify, such as HTTP coming event
 {
-	debug("To request:\n");
+	debug("Do request CGI:\n");
 	if ((msg == NULL) || (msglen <= 0))
 	{
 		error("Bad parameters!!\n");
@@ -55,49 +53,18 @@ void request(int fd, const char* msg, int msglen) // TODO: design a "listner" me
 	printf("(end)\n");
 #endif
 
-	// construct env. variant retrieved from "msg"
-	char** envlist = envlist_init();
-
-	int envstart = 0;
-	for (i = 0; i < msglen; i++) // Parse the line one by one
-	{
-		if ((msg[i] == '\r') || (msg[i] == '\n')) // one line ends
-		{
-			int envlen = i - envstart; // not contains '\0'
-			if (envlen > 0) // to avoid that many '\r' or '\n' following together
-			{
-				char* envstr = malloc(envlen + 1); // TODO: any optimization can do here?? - not malloc always
-				memcpy(envstr, msg + envstart, envlen);
-				envstr[envlen] = '\0';
-
-				envlist_add(envstr); // TODO: one more param for "envlist"
-
-				free(envstr);
-				envstr = NULL;
-			}
-
-			envstart = i + 1; // substring to parse starting from next byte
-		}
-	}
-
-	envlist_dump(envlist, envlist_num());
-
-	// run cgi
-	if (envlist[0] != NULL) // 1st one is NULL, means no env variant
-	{
-		cgi_addlisten(fd, respond);
-		cgi_run(envlist); // TODO: now it directly cb "respond", so still "syn" call! Improve!!
-	}
+	cgi_addlisten(fd, on_cgi_notified);
+	cgi_request(msg, msglen);
 }
 
-void process_events(TransEvent evt, TransConn* conn, char* s, unsigned int l)
+void on_trans_notified(TransEvent evt, TransConn* conn, char* s, unsigned int l)
 {
 	if ((conn == NULL) || (evt >= TransEvent_UNKNOWN))
 	{
 		error("Invalid trans %x message(%d)\n", conn, evt);
 		return;
 	}
-	debug("New event=%s\n", get_eventname(evt));
+	debug("On new trans event=%s\n", trans_get_eventname(evt));
 
 	switch (evt)
 	{
@@ -108,8 +75,7 @@ void process_events(TransEvent evt, TransConn* conn, char* s, unsigned int l)
 			return;
 		}
 
-		request(conn->conn_fd, s, l);
-
+		request_cgi(conn->conn_fd, s, l);
 		break;
 
 		case TransEvent_ON_DISCONNECT: // just before its exit

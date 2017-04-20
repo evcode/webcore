@@ -4,7 +4,7 @@
 
 #include "trans.h"
 #include "util.h"
-extern void process_events(TransEvent, TransConn*, char*, unsigned int);
+extern void on_trans_notified(TransEvent, TransConn*, char*, unsigned int);
 
 static int system_le()
 {
@@ -52,7 +52,7 @@ int main (int argc, char* argv[], char* envp[])
 	}
 
 	// processing main-body
-	trans_addlisten(process_events);
+	trans_addlisten(on_trans_notified);
 	trans_start((argc>1), dst);
 
 	// cannot reach here

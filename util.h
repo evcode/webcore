@@ -5,15 +5,15 @@
 
 // TODO: double check how debug macro impl in tmm projects and some opensource, such as nginx
 #define error(x...) do {\
-						printf("ERROR %s,%d|||", __func__, __LINE__);\
+						printf("ERROR (%d) %s,%d|||", getpid(), __func__, __LINE__);\
 						printf(x);\
 					 } while(0)
 #define inform(x...)  do {\
-						printf("INFORM %s,%d|||", __func__, __LINE__);\
+						printf("INFO  (%d) %s,%d|||", getpid(), __func__, __LINE__);\
 						printf(x);\
 					 } while(0)
 #define debug(x...)  do {\
-						printf("DEBUG %s,%d|||", __func__, __LINE__);\
+						printf("DEBUG (%d) %s,%d|||", getpid(), __func__, __LINE__);\
 						printf(x);\
 					 } while(0)
 

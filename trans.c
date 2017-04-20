@@ -297,11 +297,11 @@ void closesock(Transaction* trans)
 #define TRANS_RECVBUF_SIZE 120
 #define TRANS_SENDBUF_SIZE (TRANS_RECVBUF_SIZE+8)
 
-static char* eventnames[] = {"NEW CONNECTION", "INCOMING MSG","ON DISCONNECT"};
+static char* eventnames[] = {"NEW CONNECTION", "INCOMING MSG", "ON DISCONNECT"};
 
-char* get_eventname(TransEvent evt)
+char* trans_get_eventname(TransEvent evt)
 {
-	if (evt >= TransEvent_UNKNOWN)
+	if (evt >= sizeof(eventnames)/sizeof(eventnames[0]))
 		return "unknown-event";
 
 	return eventnames[evt];
@@ -330,8 +330,8 @@ void transact(TransConn *conn)
 	// NOTE: one-time receive for one connetion(accepted) - "while" just for TEST
 	{
 #ifdef TEST_SEND_STRESS
-		sleep(give_random(10));
-#endif // for Stress not sleep always - i think it simulates an actual env.
+		sleep(give_random(10)); // for Stress not sleep always - i think it simulates an actual env.
+#endif
 
 		totalrecv = 0;
 
@@ -399,7 +399,7 @@ void send_stress(Transaction trans)
 		{
 			error("Failed to send, err=%d\n", len);
 			say_errno();
-			return -3;
+			return;
 		}
 
 		debug("pid=%d Client sent %d bytes>>\n", getpid(), len);
@@ -417,7 +417,7 @@ void send_stress(Transaction trans)
 	}
 }
 
-void trans_start(int mode, char* dst) // mode "0" means Server
+int trans_start(int mode, char* dst) // mode "0" means Server
 {
 /*
 	Transaction init
@@ -448,11 +448,11 @@ void trans_start(int mode, char* dst) // mode "0" means Server
 /*
 	Here we go
 */
-	if (trans.trans_mode) // the transaction is requesting
+	if (trans.trans_mode) // Client: the transaction is requesting
 	{
 		send_stress(trans);
 	}
-	else // standby for next connection
+	else // Server: standby for next connection
 	{
 		while (1)
 		{
@@ -473,7 +473,7 @@ void trans_start(int mode, char* dst) // mode "0" means Server
 				debug("After fork, Server child pid=%d (recv) continues\n", getpid());
 
 				/*
-					NOTE: in Chind process do close the unnessary "fd"
+					NOTE: in Chind process do close the Parent "fd"
 				*/
 				close(trans.trans_fd);
 
@@ -481,6 +481,7 @@ void trans_start(int mode, char* dst) // mode "0" means Server
 					notify_newevent(TransEvent_NEWCONNECTION,
 						trans.conn_end, NULL, 0);
 
+				// Main receive body
 				transact(trans.conn_end);
 
 				if (notify_newevent)
@@ -504,6 +505,13 @@ void trans_start(int mode, char* dst) // mode "0" means Server
 			{
 				debug("After fork, Server parent pid=%d (accept) continues\n", getpid());
 
+				/*
+					NOTE: in Parent process do close the Child "fd"
+				*/
+				close(trans.conn_end->conn_fd);
+
+				// TODO: remove from conn pool
+
 				// TODO: waitpid??
 
 				// TODO end the zombie
@@ -514,5 +522,6 @@ void trans_start(int mode, char* dst) // mode "0" means Server
 	}
 
 	// TODO: RELEASE the resource before leaving (return or exit)!!!
-	closesock(&trans);
+
+	return -1;
 }
