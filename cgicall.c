@@ -1,5 +1,39 @@
 #include "cgicall.h"
 
+CGI_StatusCode cgi_get_statuscode(int err)
+{
+	switch(err)
+	{
+		case CGI_NOTIFY_OK:
+		break;
+
+		case CGI_NOTIFY_BAD_ENV:
+		break;
+
+		case CGI_NOTIFY_CGI_ERR:
+		break;
+
+		case CGI_NOTIFY_TIMEOUT:
+		beak;
+
+		case CGI_NOTIFY_INVALID_DATA:
+		break;
+
+		default:
+		break;
+	}
+}
+
+static char* cginotify[] = {"NOTIFY OK", "BAD ENV VARIANT", "CGI ERROR", "TIME OUT", "INVALID DATA", "UNKNOWN ERROR"};
+
+char* cgi_get_notifyname(int evt)
+{
+	if (evt >= sizeof(cginotify)/sizeof(cginotify[0]))
+		return "unknown-notify";
+
+	return cginotify[evt];
+}
+
 static int response_id = -1;
 static void (*response_cb)(int, int, char*, int) = NULL;
 
@@ -45,16 +79,6 @@ void cgi_addlisten(int id, void(*cb)(int id, int err, char* msg, int len))
 #include <fcntl.h> // + pipe2, and O_*
 #include <unistd.h> // for pipe(), dup, etc
 					// + STDIN_FILENO、STDOUT_FILENO and STDERR_FILENO
-
-static char* cginotify[] = {"NOTIFY OK", "BAD ENV VARIANT", "CGI ERROR", "TIME OUT", "INVALID DATA", "UNKNOWN ERROR"};
-
-char* cgi_get_notifyname(int evt)
-{
-	if (evt >= sizeof(cginotify)/sizeof(cginotify[0]))
-		return "unknown-notify";
-
-	return cginotify[evt];
-}
 
 void cgi_run(char* envp[])
 {
