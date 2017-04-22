@@ -6,6 +6,10 @@ static CGI_StatusCode http_statuslist[] =
 	http://www.baidu.com/link?url=sjNCIH7jFNEVlq8lA-vPCkfJJ-qyAGLwC6RqKYUs6srxCCna9khV0eb_qpGjB4gSr46dZj9WTPc07w5M2xqCxZE5LD_KFDVcmJUkxIih1eEzkIf1QNRI_S_sF6P9SuTD&wd=&eqid=ebc44488000276c70000000458f9b21e
 	*/
 
+	// TODO: take the first one as DEFAULT
+	// Server error
+	{500, "Internal Server Error", ""},
+
 	// Message
 	{100, "Continue", ""},
 
@@ -34,15 +38,15 @@ static CGI_StatusCode http_statuslist[] =
 	{415, "Unsupported Media Type", ""},
 
 	// Server error
-	{500, "Internal Server Error", ""},
 	{501, "Not Implemented", ""},
 	{502, "Bad Gateway", ""},
 	{503, "Service Unavailable", ""},
 	{504, "Gateway Timeout", ""},
 	{505, "HTTP Version Not Supported", ""},
+	{507, "Insufficient Storage", ""}
 };
 
-CGI_StatusCode cgi_get_statuscode(int err) // TODO: IMPROVE IT!! current mapping impl is poor!! a O(1) algorithm???
+CGI_StatusCode cgi_get_statuscode(int err)
 {
 	int sta;
 	switch(err) // mapping to statuscode
@@ -68,6 +72,7 @@ CGI_StatusCode cgi_get_statuscode(int err) // TODO: IMPROVE IT!! current mapping
 		break;
 	}
 
+	// TODO: IMPROVE IT!! current mapping impl is poor!! a O(1) algorithm???
 	int i;
 	for (i = 0; i < sizeof(http_statuslist)/sizeof(http_statuslist[0]); i ++)
 	{
@@ -75,7 +80,7 @@ CGI_StatusCode cgi_get_statuscode(int err) // TODO: IMPROVE IT!! current mapping
 			return http_statuslist[i];
 	}
 
-	return http_statuslist[0]; // TOOD:!!!!!!!!!!!!!!!!!!!!!!!!!
+	return http_statuslist[0]; // TOOD: 1st one is DEFAULT - UGLY coding!!!!!
 }
 
 static char* cginotify[] = {"NOTIFY OK", "BAD ENV VARIANT", "CGI ERROR", "TIME OUT", "INVALID DATA", "UNKNOWN ERROR"};

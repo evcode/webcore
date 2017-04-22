@@ -314,14 +314,19 @@ void trans_addlisten(void (*cb)(TransEvent, TransConn*, char*, unsigned int))
 #define TRANS_RECVBUF_SIZE 120
 #define TRANS_SENDBUF_SIZE (TRANS_RECVBUF_SIZE+8)
 
+// TODO: MSS should not be larger than '1500' - that put it in "static" area is good???
+#define TOTOAL_MSG_LEN 1500
+static char totalmsg[TOTOAL_MSG_LEN];
+
 void transact(TransConn *conn)
 {
 	int conn_fd = conn->conn_fd;
 
+	/* NOTE actually i can direclty put received data into "totalmsg",
+	here "transrecv" mainly aims to simulate the bad netowrk env*/
 	char transrecv[TRANS_RECVBUF_SIZE];
 	int bufflen = sizeof(transrecv), len;
-#define TOTOAL_MSG_LEN 1500
-	char totalmsg[TOTOAL_MSG_LEN]; // TODO: replace with realloc(), or direclty apply it to "transrecv" - char* transrecv;
+
 	int totalrecv;
 
 	debug("Start to receive at conn=%d\n", conn_fd);

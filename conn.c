@@ -16,37 +16,61 @@ void on_cgi_notified(int fd, int err, char* s, int n) // "s" is the Content info
 	printf("(end)\n");
 */
 
-	// TODO: optimise the "send" processing as below!!!
+	// TODO: do a malloc wrapper??? any optimise can applied below???
+	unsigned int httplen = 0; // TODO: for out-of-range check before memcpy below
+	unsigned int httpoff = 0;
+
+	httplen = n+1024; // 1024 reserved for http fields except "Content"
+	char* httpbuff = malloc(httplen);
+	if (httpbuff == NULL)
+	{
+		// TODO: generate "507"????
+		error("Out of memory!!");
+	}
 
 	// status-line
 	char* status_line[128];
 	CGI_StatusCode sta = cgi_get_statuscode(err);
 	sprintf(status_line, "%s %d %s\r\n", "HTTP/1.1", sta.sta_code, sta.sta_name);
 	debug("Status-line:%s\n", status_line);
-	send(fd, status_line, strlen(status_line), 0);
+	memcpy(httpbuff+httpoff, status_line, strlen(status_line)); // TODO: check out-of-range before copy
+	httpoff += strlen(status_line);
 
 	// respond-header
 	char* html_field="Server: miniweb\r\nContent-Type: text/html; charset=utf-8\r\n";
-	send(fd, html_field, strlen(html_field), 0);
+	memcpy(httpbuff+httpoff, html_field, strlen(html_field)); // TODO: check out-of-range before copy
+	httpoff += strlen(html_field);
+
 	// "CONTENT_LENGTH" not mandatory???
 
 	// content body
 	char* html_format = "\r\n"; // Content starts here - Mandatory
 								// ,for some format, without webpage cannot identify
-	send(fd, html_format, strlen(html_format), 0);
+	memcpy(httpbuff+httpoff, html_format, strlen(html_format)); // TODO: check out-of-range before copy
+	httpoff += strlen(html_format);
 
-	if ((s != NULL) && (n != 0)) // NO Content carried
+	if ((s != NULL) && (n != 0))
 	{
-		int len = send(fd, s, n, 0); // TODO: flags
-		if (len != n)
-		{
-			error("Failed to send, err=%d\n", len);
-			say_errno();
-			return;
-		}
-
-		debug("pid=%d Server responds %d bytes>>\n", getpid(), len);
+		memcpy(httpbuff+httpoff, s, n); // TODO: check out-of-range before copy
+		httpoff += n;
 	}
+	else
+	{
+		// NO Content carried
+	}
+
+	// Send Http-datagram
+	int len = send(fd, httpbuff, httpoff, 0); // TODO: flags
+	if (len != httpoff)
+	{
+		error("Failed to send, err=%d\n", len);
+		say_errno();
+		return;
+	}
+	debug("pid=%d Server responds %d bytes>>\n", getpid(), len);
+
+	free(httpbuff);
+	httpbuff = NULL;
 }
 
 void request_cgi(int fd, const char* msg, int msglen) // TODO: design a "listner" mechanism??? to notify, such as HTTP coming event
@@ -87,7 +111,7 @@ void on_trans_notified(TransEvent evt, TransConn* conn, char* s, unsigned int l)
 			return;
 		}
 
-		request_cgi(conn->conn_fd, s, l);
+		request_cgi(conn->conn_fd, s, l);  // TODO: i hate to directly give "fd" here. IMPROVE!!
 		break;
 
 		case TransEvent_ON_DISCONNECT: // just before its exit
