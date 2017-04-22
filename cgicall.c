@@ -1,27 +1,81 @@
 #include "cgicall.h"
 
-CGI_StatusCode cgi_get_statuscode(int err)
+static CGI_StatusCode http_statuslist[] =
 {
-	switch(err)
+	/*
+	http://www.baidu.com/link?url=sjNCIH7jFNEVlq8lA-vPCkfJJ-qyAGLwC6RqKYUs6srxCCna9khV0eb_qpGjB4gSr46dZj9WTPc07w5M2xqCxZE5LD_KFDVcmJUkxIih1eEzkIf1QNRI_S_sF6P9SuTD&wd=&eqid=ebc44488000276c70000000458f9b21e
+	*/
+
+	// Message
+	{100, "Continue", ""},
+
+	// Success
+	{200, "OK", ""},
+	{201, "Created", ""},
+	{202, "Accepted", ""},
+	{204, "No Content", ""},
+	{205, "Reset Content", ""},
+
+	// Redirection
+	{302, "Move temporarily", ""},
+	{303, "See Other", ""},
+	{305, "Use Proxy", ""},
+
+	// Client request error
+	{400, "Bad Request", ""},
+	{401, "Unauthorized", ""},
+	{403, "Forbidden", ""},
+	{404, "Not Found", ""},
+	{405, "Method Not Allowed", ""},
+	{406, "Not Acceptable", ""},
+	{408, "Request Timeout", ""},
+	{413, "Request Entity Too Large", ""},
+	{414, "Request-URI Too Long", ""},
+	{415, "Unsupported Media Type", ""},
+
+	// Server error
+	{500, "Internal Server Error", ""},
+	{501, "Not Implemented", ""},
+	{502, "Bad Gateway", ""},
+	{503, "Service Unavailable", ""},
+	{504, "Gateway Timeout", ""},
+	{505, "HTTP Version Not Supported", ""},
+};
+
+CGI_StatusCode cgi_get_statuscode(int err) // TODO: IMPROVE IT!! current mapping impl is poor!! a O(1) algorithm???
+{
+	int sta;
+	switch(err) // mapping to statuscode
 	{
 		case CGI_NOTIFY_OK:
+			sta = 200;
 		break;
 
 		case CGI_NOTIFY_BAD_ENV:
+			sta = 400;
 		break;
 
 		case CGI_NOTIFY_CGI_ERR:
-		break;
-
-		case CGI_NOTIFY_TIMEOUT:
-		beak;
-
 		case CGI_NOTIFY_INVALID_DATA:
+			sta = 500;
+		break;
+		case CGI_NOTIFY_TIMEOUT:
+			sta = 504;
 		break;
 
 		default:
+			sta = 501;
 		break;
 	}
+
+	int i;
+	for (i = 0; i < sizeof(http_statuslist)/sizeof(http_statuslist[0]); i ++)
+	{
+		if (sta == http_statuslist[i].sta_code)
+			return http_statuslist[i];
+	}
+
+	return http_statuslist[0]; // TOOD:!!!!!!!!!!!!!!!!!!!!!!!!!
 }
 
 static char* cginotify[] = {"NOTIFY OK", "BAD ENV VARIANT", "CGI ERROR", "TIME OUT", "INVALID DATA", "UNKNOWN ERROR"};
@@ -200,20 +254,26 @@ void cgi_run(char* envp[])
 		// reading done, and respond it
 		if (response_cb)
 		{
+			char* desc;
 			if (totaloff > 0)
 			{
-				if (str_startwith(CGI_ERROR))
-					response_cb(response_id, CGI_NOTIFY_CGI_ERR, totalread, totaloff);
+				if (str_startwith(CGI_ERROR)) // TODO: for extension, such as "CGI_ERROR:CGI is not ready!!"
+				{
+					desc = "CGI is not ready";
+					response_cb(response_id, CGI_NOTIFY_CGI_ERR, desc, strlen(desc));
+				}
 				else
 					response_cb(response_id, CGI_NOTIFY_OK, totalread, totaloff); // TODO: if cb inside is BLOCKING, efficiency is low!! Improve
 			}
 			else if (to == 0)
 			{
-				response_cb(response_id, CGI_NOTIFY_TIMEOUT, NULL, 0);
+				desc = "Timeout to wait CGI responding";
+				response_cb(response_id, CGI_NOTIFY_TIMEOUT, desc, strlen(desc));
 			}
 			else if (totaloff == 0)
 			{
-				response_cb(response_id, CGI_NOTIFY_INVALID_DATA, NULL, 0);
+				desc = "Invalid data retrieved from CGI";
+				response_cb(response_id, CGI_NOTIFY_INVALID_DATA, desc, strlen(desc));
 			}
 		}
 
@@ -228,6 +288,8 @@ void cgi_run(char* envp[])
 
 	debug("-------------------- cgi completed!!\n\n");
 }
+
+extern char** envlist_init(); // NOTE: (on MACOS??) MANDATORY;otherwise, it will crash when to read it here. WHY????????????
 
 void cgi_request(const char* msg, int msglen)
 {

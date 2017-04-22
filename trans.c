@@ -294,9 +294,6 @@ void closesock(Transaction* trans)
 }
 
 // *******************************************************************
-#define TRANS_RECVBUF_SIZE 120
-#define TRANS_SENDBUF_SIZE (TRANS_RECVBUF_SIZE+8)
-
 static char* eventnames[] = {"NEW CONNECTION", "INCOMING MSG", "ON DISCONNECT"};
 
 char* trans_get_eventname(TransEvent evt)
@@ -313,6 +310,9 @@ void trans_addlisten(void (*cb)(TransEvent, TransConn*, char*, unsigned int))
 {
 	notify_newevent = cb;
 }
+
+#define TRANS_RECVBUF_SIZE 120
+#define TRANS_SENDBUF_SIZE (TRANS_RECVBUF_SIZE+8)
 
 void transact(TransConn *conn)
 {
@@ -478,15 +478,13 @@ int trans_start(int mode, char* dst) // mode "0" means Server
 				close(trans.trans_fd);
 
 				if (notify_newevent)
-					notify_newevent(TransEvent_NEWCONNECTION,
-						trans.conn_end, NULL, 0);
+					notify_newevent(TransEvent_NEWCONNECTION, trans.conn_end, NULL, 0);
 
 				// Main receive body
 				transact(trans.conn_end);
 
 				if (notify_newevent)
-					notify_newevent(TransEvent_ON_DISCONNECT,
-						trans.conn_end, NULL, 0);
+					notify_newevent(TransEvent_ON_DISCONNECT,trans.conn_end, NULL, 0);
 
 				// not need the "conn" anymore
 				close(trans.conn_end->conn_fd);
