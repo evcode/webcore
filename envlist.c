@@ -6,7 +6,7 @@ typedef struct
 	char* env_name;
 } EnvMapping;
 
-EnvMapping cgi_envmapping[] = 
+EnvMapping cgi_envmapping[] = // mapping of HTTP fields NOT including Request-line
 {
 	{"User-Agent",			"HTTP_USER_AGENT"},
 	{"Accept-Language",		"ACCEPT_LANGUAGE"},
@@ -72,15 +72,18 @@ int envlist_num()
 	return envnum;
 }
 
-/*
-The input "str" format is: "<http filed>: <filed value>"
-, the result should be env "<env name>=<field value> added into env list"
-*/
-BOOL envlist_add(const char* str)
+#include "cgicall.h" // for notify error
+#define HTTP_URL_LEN 256
+#define HTTP_LOCAL_PATH "../www"
+CGI_NOTIFY envlist_add(const char* str)
 {
 	int i;
 
 	// Check HTTP Request-line firslty
+	/*
+	The input "str" format here, such as "Get /index HTTP/1.1"
+	*/
+	// TODO: merge the impl into Header processing as below????
 	for (i = 0; i < sizeof(http_methods)/sizeof(http_methods[0]); i ++)
 	{
 		if (str_startwith(str, http_methods[i]))
@@ -88,11 +91,58 @@ BOOL envlist_add(const char* str)
 			char* k = "REQUEST_METHOD";
 			char* v = http_methods[i];
 
-			return addenv(k, v);
+			if (strcmp(v, "GET") == 0) // index 0 is "GET"
+			{
+				char* substr = str+4; // skip "GET "
+				int pathlen = 0;
+
+				char* end = strstr(substr, " ");
+				if (end == NULL)
+				{
+					debug("ERROR: failed to parse URL\n");
+					return CGI_NOTIFY_BAD_REQUEST;
+				}
+				else
+				{
+					pathlen = end - substr;
+				}
+
+				int localpath_len = strlen(HTTP_LOCAL_PATH);
+				if (pathlen >= HTTP_URL_LEN-localpath_len) // reserve for local path and '\0'
+				{
+					debug("ERROR: URL is too long\n");
+					return CGI_NOTIFY_TOOLONG_REQUEST;
+				}
+				else
+				{
+					char url[HTTP_URL_LEN];
+					memcpy(url, HTTP_LOCAL_PATH, localpath_len); // "../www"
+					memcpy(url+localpath_len, substr, pathlen);  // "../www/index.html"
+					url[localpath_len+pathlen]='\0';
+					debug("Request URL(%d)=%s\n", pathlen, url);
+
+					addenv("PATH_INFO", url);
+
+					// TODO: http version
+				}
+			}
+			else if (strcmp(v, "POST") == 0)
+			{
+				// TODO: fix me
+			}
+
+			// TODO: POST and others...
+
+			addenv(k, v);
+			return CGI_NOTIFY_OK;
 		}
 	}
 
 	// Start scan the Header fields...
+	/*
+	The input "str" format as Header is: "<http filed>: <filed value>"
+	, the result should be env "<env name>=<field value> added into env list"
+	*/
 	char* env_name = NULL;
 
 	// Get Http-Env mapping
@@ -110,11 +160,13 @@ BOOL envlist_add(const char* str)
 	{
 		int valstart = strlen(cgi_envmapping[i].http_field) + 2; // skip the following ':' and a space in a HTTP line
 		
-		return addenv(env_name, &str[valstart]);
+		addenv(env_name, &str[valstart]);
+		return CGI_NOTIFY_OK;
 	}
 
+	// Here regard it as a Warning, return "OK"
 	error("ENV: failed to add <%s>\n", str);
-	return FALSE;
+	return CGI_NOTIFY_OK;
 }
 
 void envlist_dump(char** e, int l)

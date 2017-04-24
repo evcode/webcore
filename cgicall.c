@@ -49,14 +49,26 @@ static CGI_StatusCode http_statuslist[] =
 CGI_StatusCode cgi_get_statuscode(int err)
 {
 	int sta;
-	switch(err) // mapping to statuscode
+
+	if ((err >= 100) || (err <= 600))
+	{
+		sta = err;
+	}
+	else
+	{
+	switch(err) // internal-error mapping to statuscode
 	{
 		case CGI_NOTIFY_OK:
 			sta = 200;
 		break;
 
 		case CGI_NOTIFY_BAD_ENV:
+		case CGI_NOTIFY_BAD_REQUEST:
 			sta = 400;
+		break;
+
+		case CGI_NOTIFY_TOOLONG_REQUEST:
+			sta = 414;
 		break;
 
 		case CGI_NOTIFY_CGI_ERR:
@@ -71,6 +83,7 @@ CGI_StatusCode cgi_get_statuscode(int err)
 			sta = 501;
 		break;
 	}
+	}
 
 	// TODO: IMPROVE IT!! current mapping impl is poor!! a O(1) algorithm???
 	int i;
@@ -80,17 +93,22 @@ CGI_StatusCode cgi_get_statuscode(int err)
 			return http_statuslist[i];
 	}
 
-	return http_statuslist[0]; // TOOD: 1st one is DEFAULT - UGLY coding!!!!!
+	// TOOD: 1st one is DEFAULT (actually cannot reach here) - UGLY coding!!!!!
+	return http_statuslist[0];
 }
 
-static char* cginotify[] = {"NOTIFY OK", "BAD ENV VARIANT", "CGI ERROR", "TIME OUT", "INVALID DATA", "UNKNOWN ERROR"};
+//static char* cginotify[] = {"NOTIFY OK", "BAD ENV VARIANT", "CGI ERROR", "TIME OUT", "INVALID DATA", "UNKNOWN ERROR"};
 
 char* cgi_get_notifyname(int evt)
 {
+#if 1
+	return "<not identify the notify>";
+#else
 	if (evt >= sizeof(cginotify)/sizeof(cginotify[0]))
 		return "unknown-notify";
 
 	return cginotify[evt];
+#endif
 }
 
 static int response_id = -1;
@@ -176,6 +194,8 @@ void cgi_run(char* envp[])
 		return;
 	}
 
+	// TODO handle cgi_runn() error before fork to respond HTTP
+
 	if (newpid == 0) // child: cgi execution
 	{
 		// redirect stdout of new execution - 
@@ -195,14 +215,13 @@ void cgi_run(char* envp[])
 		char* exec = "cgi/cgi";
 		char* argv[] = {"cgi", NULL}; // NOTE: on MACOS "argv" also must be NULL as tail
 		int exe = execve(exec, argv, envp);
-		if (exe < 0)
-		{
-			printf(CGI_ERROR); // NOTE: output into pipe - see also below!!
-			//error("Failed to execute <%s>!!\n", exec);
-			//say_errno();
-		}
 
-		// NOTE: cannot reach here
+		// NOTE: cannot reach here; otherwise it's error
+		{
+			char cgistr[128]; // NOTE: output into pipe - see also the error-check below!!
+			sprintf(cgistr, "%s:%d:%s", CGI_ERROR, CGI_NOTIFY_CGI_ERR, "CGI program is not ready");
+			printf(cgistr);
+		}
 		exit(1);
 	}
 	else // parent: pipe receive
@@ -262,10 +281,38 @@ void cgi_run(char* envp[])
 			char* desc;
 			if (totaloff > 0)
 			{
-				if (str_startwith(CGI_ERROR)) // TODO: for extension, such as "CGI_ERROR:CGI is not ready!!"
+				if (str_startwith(totalread, CGI_ERROR)) // format is "CGI_ERROR:2:CGI is not ready!!"
 				{
-					desc = "CGI is not ready";
-					response_cb(response_id, CGI_NOTIFY_CGI_ERR, desc, strlen(desc));
+					char success = 0;
+					do
+					{
+						char* substr = strstr(totalread, ":");
+						if (substr == NULL)
+							break;
+						substr ++; // here error code starts
+
+						char* substr2 = strstr(substr, ":");
+						if (substr2 == NULL)
+							break;
+						substr2 ++; // here error desc starts
+
+						int err_str;
+						int len = substr2 - substr;
+						char err[8];
+						memcpy(err, substr, len);
+						err[len]='\0';
+						if (sscanf(err, "%d", &err_str) != 1)
+							break;
+
+						success = 1;
+						response_cb(response_id, err_str, substr2, totaloff-(substr2-totalread));
+					} while (0);
+
+					if (!success)
+					{
+						desc = "Not identified CGI error";
+						response_cb(response_id, CGI_NOTIFY_CGI_ERR, desc, strlen(desc));
+					}
 				}
 				else
 					response_cb(response_id, CGI_NOTIFY_OK, totalread, totaloff); // TODO: if cb inside is BLOCKING, efficiency is low!! Improve
@@ -299,6 +346,7 @@ extern char** envlist_init(); // NOTE: (on MACOS??) MANDATORY;otherwise, it will
 void cgi_request(const char* msg, int msglen)
 {
 	int i;
+
 	// construct env. variant retrieved from "msg"
 	char** envlist = envlist_init();
 
@@ -314,10 +362,18 @@ void cgi_request(const char* msg, int msglen)
 				memcpy(envstr, msg + envstart, envlen);
 				envstr[envlen] = '\0';
 
-				envlist_add(envstr); // TODO: one more param for "envlist"
+				CGI_NOTIFY notify = envlist_add(envstr); // TODO: one more param for "envlist"
+				if (notify != CGI_NOTIFY_OK)
+				{
+					if (response_cb)
+						response_cb(response_id, notify, envstr, envlen);
+
+					free(envstr);
+
+					return; // release res to exit
+				}
 
 				free(envstr);
-				envstr = NULL;
 			}
 
 			envstart = i + 1; // substring to parse starting from next byte
@@ -334,6 +390,9 @@ void cgi_request(const char* msg, int msglen)
 	else
 	{
 		if (response_cb)
-			response_cb(response_id, CGI_NOTIFY_BAD_ENV, NULL, 0);
+		{
+			char* desc = "No environment variable found";
+			response_cb(response_id, CGI_NOTIFY_BAD_ENV, desc, strlen(desc));
+		}
 	}
 }

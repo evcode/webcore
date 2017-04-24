@@ -28,6 +28,7 @@ void on_cgi_notified(int fd, int err, char* s, int n) // "s" is the Content info
 		error("Out of memory!!");
 	}
 
+	// -----------------------------
 	// status-line
 	char* status_line[128];
 	CGI_StatusCode sta = cgi_get_statuscode(err);
@@ -36,6 +37,7 @@ void on_cgi_notified(int fd, int err, char* s, int n) // "s" is the Content info
 	memcpy(httpbuff+httpoff, status_line, strlen(status_line)); // TODO: check out-of-range before copy
 	httpoff += strlen(status_line);
 
+	// -----------------------------
 	// respond-header
 	char* html_field="Server: miniweb\r\nContent-Type: text/html; charset=utf-8\r\n";
 	memcpy(httpbuff+httpoff, html_field, strlen(html_field)); // TODO: check out-of-range before copy
@@ -43,11 +45,46 @@ void on_cgi_notified(int fd, int err, char* s, int n) // "s" is the Content info
 
 	// "CONTENT_LENGTH" not mandatory???
 
+	// -----------------------------
 	// content body
 	char* html_format = "\r\n"; // Content starts here - Mandatory
 								// ,for some format, without webpage cannot identify
 	memcpy(httpbuff+httpoff, html_format, strlen(html_format)); // TODO: check out-of-range before copy
 	httpoff += strlen(html_format);
+
+	//take it (error case) for example:
+	/*
+	<html>
+		<head>
+			<title>404 not found</title>
+		</head>
+		<body>
+			<h2>404 not found</h2>
+			<p>Error: the requested is not found</p>
+		</body>
+	</html>
+	*/
+	char* text = "<html><head><title>"; // format a Webpage style for error
+	if (err != CGI_NOTIFY_OK)
+	{
+		memcpy(httpbuff+httpoff, text, strlen(text)); // TODO: check out-of-range before copy
+		httpoff += strlen(text);
+
+		sprintf(status_line, "%d %s", sta.sta_code, sta.sta_name);
+		memcpy(httpbuff+httpoff, status_line, strlen(status_line)); // TODO: check out-of-range before copy
+		httpoff += strlen(status_line);
+
+		text = "</title></head><body><h2>";
+		memcpy(httpbuff+httpoff, text, strlen(text)); // TODO: check out-of-range before copy
+		httpoff += strlen(text);
+
+		memcpy(httpbuff+httpoff, status_line, strlen(status_line)); // TODO: check out-of-range before copy
+		httpoff += strlen(status_line);
+
+		text = "</h2><p>Error: ";
+		memcpy(httpbuff+httpoff, text, strlen(text)); // TODO: check out-of-range before copy
+		httpoff += strlen(text);
+	}
 
 	if ((s != NULL) && (n != 0))
 	{
@@ -56,21 +93,36 @@ void on_cgi_notified(int fd, int err, char* s, int n) // "s" is the Content info
 	}
 	else
 	{
-		// NO Content carried
+		if (err != CGI_NOTIFY_OK)
+		{
+			text = "No more error information";
+			memcpy(httpbuff+httpoff, text, strlen(text)); // TODO: check out-of-range before copy
+			httpoff += strlen(text);
+		}
+		else
+		{
+			// No "Content" carried
+		}
 	}
 
+	if (err != CGI_NOTIFY_OK)
+	{
+		text = "</p></body></html>";
+		memcpy(httpbuff+httpoff, text, strlen(text)); // TODO: check out-of-range before copy
+		httpoff += strlen(text);
+	}
+
+	// -----------------------------
 	// Send Http-datagram
 	int len = send(fd, httpbuff, httpoff, 0); // TODO: flags
 	if (len != httpoff)
 	{
-		error("Failed to send, err=%d\n", len);
+		error("Failed to send, err=%d\n", len); // TODO: in case failure turn to another HTTP error sent?!!
 		say_errno();
-		return;
 	}
 	debug("pid=%d Server responds %d bytes>>\n", getpid(), len);
 
 	free(httpbuff);
-	httpbuff = NULL;
 }
 
 void request_cgi(int fd, const char* msg, int msglen) // TODO: design a "listner" mechanism??? to notify, such as HTTP coming event

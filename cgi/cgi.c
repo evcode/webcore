@@ -2,27 +2,44 @@
 #include <stdio.h>
 #include <string.h>
 
+#include <fcntl.h> // for "open"
+#include <unistd.h> // stdin/out fd
+
+
+void cgierr(int err, char* desc)
+{
+	char cgistr[256]; // format: CGI_ERROR:<http status code>:<err description>"
+
+	sprintf(cgistr, "CGI_ERROR:%d:%s", err, desc);
+	printf(cgistr);
+}
+
 char* cgi_envs[] = 
 {
 	"REQUEST_METHOD",
+	"PATH_INFO",
 	"HTTP_USER_AGENT",
 	"ACCEPT_LANGUAGE",
 	"ACCEPT_ENCODING",
 	"HTTP_ACCEPT",
-	"PATH" // only for test here
 };
+
+static char readbuff[4*1024];
+static unsigned int readlen = 0;
 
 int main(int argc, char* argv[])
 {
 	int i;
 
+#if 0
+	// dump command line
 	for (i = 0; i < argc; i ++)
 	{
 		printf("%s ", argv[i]);
 	}
 	printf("\n\n");
 
-	// -----------------------------
+	// dump env. variants
 	for (i = 0; i < sizeof(cgi_envs)/sizeof(cgi_envs[0]); i ++)
 	{
 		char* key = cgi_envs[i];
@@ -36,6 +53,33 @@ int main(int argc, char* argv[])
 		else
 		{
 			printf("<not set>\n");
+		}
+	}
+#endif
+
+	char* path = getenv("PATH_INFO");
+	if (path == NULL)
+	{
+		cgierr(404, "No path information");
+	}
+	else
+	{
+		int fd = open(path, O_RDONLY);
+		if (fd < 0)
+		{
+			cgierr(404, "Not found");
+		}
+		else
+		{
+			do
+			{
+				readlen = read(fd, readbuff, sizeof(readbuff));
+				if (readlen > 0)
+					write(STDOUT_FILENO, readbuff, readlen);
+
+			} while (readlen == sizeof(readbuff));
+
+			close(fd);
 		}
 	}
 
