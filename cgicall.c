@@ -50,7 +50,7 @@ CGI_StatusCode cgi_get_statuscode(int err)
 {
 	int sta;
 
-	if ((err >= 100) || (err <= 600))
+	if ((err >= 100) && (err <= 600))
 	{
 		sta = err;
 	}
@@ -262,7 +262,8 @@ void cgi_run(char* envp[])
 		{
 			n ++;
 			totalread = realloc(totalread, n*CGI_RESPONSE_LEN);
-			debug("realloc more=%d\n", n*CGI_RESPONSE_LEN);
+			//debug("realloc more=%d\n", n*CGI_RESPONSE_LEN);
+			printf(".");
 
 			remaining = n*CGI_RESPONSE_LEN-totaloff;
 			rlen = read(fromcgi[0], totalread+totaloff, remaining);
@@ -274,6 +275,8 @@ void cgi_run(char* envp[])
 
 			// TODO: any sleep here??? to release timeslice
 		}
+		printf("\n"); // end of "." above
+		debug("Totally %d bytes received from cgi\n", totaloff);
 
 		// reading done, and respond it
 		if (response_cb)

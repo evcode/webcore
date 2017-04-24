@@ -8,7 +8,8 @@ extern CGI_StatusCode cgi_get_statuscode(int err); // on MACOS compiling error: 
 
 void on_cgi_notified(int fd, int err, char* s, int n) // "s" is the Content inform
 {
-	debug("On new CGI notified=%s\n", cgi_get_notifyname(err));
+	//debug("On new CGI notified=%s\n", cgi_get_notifyname(err));
+	debug("On new CGI notify-code=%d\n", err);
 /*
 	int i;
 	for (i = 0; i < n; i ++)
