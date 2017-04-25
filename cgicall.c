@@ -111,6 +111,8 @@ char* cgi_get_notifyname(int evt)
 			return "BAD REQUEST";
 		case CGI_NOTIFY_TOOLONG_REQUEST:
 			return "TOO LONG REQUEST";
+		case CGI_NOTIFY_METHOD_NOT_SUPPORT:
+			return "METHOD NOT SUPPORT";
 		case CGI_NOTIFY_TIMEOUT:
 			return "RESPOND TIME OUT";
 		case CGI_NOTIFY_INVALID_DATA:

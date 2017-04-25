@@ -83,7 +83,12 @@ CGI_NOTIFY envlist_add(const char* str)
 	/*
 	The input "str" format here, such as "Get /index HTTP/1.1"
 	*/
-	// TODO: merge the impl into Header processing as below????
+	/* TODO: merge the impl into Header processing as below????
+	For example:
+	{"Get",			"REQUEST_METHOD"},
+	{"POST",		"REQUEST_METHOD"},
+	...
+	*/
 	for (i = 0; i < sizeof(http_methods)/sizeof(http_methods[0]); i ++)
 	{
 		if (str_startwith(str, http_methods[i]))
@@ -126,12 +131,11 @@ CGI_NOTIFY envlist_add(const char* str)
 					// TODO: http version
 				}
 			}
-			else if (strcmp(v, "POST") == 0)
+			else // TODO: POST and others...
 			{
-				// TODO: fix me
+				debug("ERROR: not support the method(%s)\n", v);
+				return CGI_NOTIFY_METHOD_NOT_SUPPORT;
 			}
-
-			// TODO: POST and others...
 
 			addenv(k, v);
 			return CGI_NOTIFY_OK;
@@ -165,7 +169,7 @@ CGI_NOTIFY envlist_add(const char* str)
 	}
 
 	// Here regard it as a Warning, return "OK"
-	error("ENV: failed to add <%s>\n", str);
+	error("ENV: not identified <%s>\n", str);
 	return CGI_NOTIFY_OK;
 }
 

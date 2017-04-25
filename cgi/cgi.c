@@ -73,7 +73,7 @@ int main(int argc, char* argv[])
 		{
 			do
 			{
-				readlen = read(fd, readbuff, sizeof(readbuff));
+				readlen = read(fd, readbuff, sizeof(readbuff)); // TODO: it cannot handle a local Folder type!!!
 				if (readlen > 0)
 					write(STDOUT_FILENO, readbuff, readlen);
 
