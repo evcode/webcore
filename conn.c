@@ -8,8 +8,7 @@ extern CGI_StatusCode cgi_get_statuscode(int err); // on MACOS compiling error: 
 
 void on_cgi_notified(int fd, int err, char* s, int n) // "s" is the Content inform
 {
-	//debug("On new CGI notified=%s\n", cgi_get_notifyname(err));
-	debug("On new CGI notify-code=%d\n", err);
+	debug("On new CGI notified=%s (%d bytes)\n", cgi_get_notifyname(err), n);
 /*
 	int i;
 	for (i = 0; i < n; i ++)
@@ -27,6 +26,7 @@ void on_cgi_notified(int fd, int err, char* s, int n) // "s" is the Content info
 	{
 		// TODO: generate "507"????
 		error("Out of memory!!");
+		return;
 	}
 
 	// -----------------------------
@@ -153,10 +153,16 @@ void on_trans_notified(TransEvent evt, TransConn* conn, char* s, unsigned int l)
 		error("Invalid trans %x message(%d)\n", conn, evt);
 		return;
 	}
-	debug("On new trans event=%s\n", trans_get_eventname(evt));
+	debug("On new trans event=%s (%d bytes)\n", trans_get_eventname(evt), l);
 
 	switch (evt)
 	{
+		case TransEvent_REQUEST_TIMEOUT:
+		case TransEvent_RECEIVE_FAILURE:
+		case TransEvent_OUT_OF_MEMORY:
+		// TODO: fix me
+		break;
+
 		case TransEvent_NEWCONNECTION:
 		case TransEvent_INCOMING_MSG:
 		if ((s == NULL) || (l == 0)) // no actual data carried

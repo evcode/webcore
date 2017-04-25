@@ -69,22 +69,25 @@ typedef struct trans_struct
 	TRANS_DOMAIN trans_domain; // inet, inet6, ap_unix...
 	TRANS_TYPE trans_type; // tcp(stream), udp(dgram)...
 
+	// local socket
 	int trans_fd;
 	struct sockaddr trans_addr;
 	socklen_t trans_len;
+	int backlog; // max backlog for listen()
 
-	// Server properties
+	// remote-conn pool
 	TransConn* conn_start; // that from Start to End maintains a Trans pool
 	TransConn* conn_end;
 	int conn_max; // allowed connected clients
 	int conn_nbr; // connected clients count
-
-	int backlog; // max backlog for listen()
 } Transaction;
 
 typedef enum  // TODO: do edit "trans_get_eventname()" if update here!!
 {
 	TransEvent_NEWCONNECTION=0,
+	TransEvent_REQUEST_TIMEOUT,
+	TransEvent_RECEIVE_FAILURE,
+	TransEvent_OUT_OF_MEMORY,
 	TransEvent_INCOMING_MSG,
 	TransEvent_ON_DISCONNECT,
 

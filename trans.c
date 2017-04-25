@@ -139,14 +139,14 @@ int opensock(TRANS_TYPE type, Transaction* trans)
 	setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &optvalue, sizeof(optvalue));
 	optvalue = 500;
 	setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &optvalue, sizeof(optvalue));
+	// NOTE: here buff means the local fd - how about the conn_fd from remote:
+	//       they're same!! refer to acceptsock() - at least on Ubuntu
 	optvalue = 1; // NOTE: fix "address in use" due to TIME_WAIT
 	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &optvalue, sizeof(optvalue));
 	optvalue = 1;
 	setsockopt(fd, IPPROTO_IP, TCP_NODELAY, &optvalue, sizeof(optvalue));
 
-	debug("Open the trans=%d\n", fd);	
-	// NOTE: here buff means the local fd - how about the conn_fd from remote:
-	//       they're same!! refer to acceptsock()
+	debug("Open the trans=%d\n", fd);
 	dumpsock(fd);
 
 	memset(trans, 0, sizeof(Transaction));
@@ -180,7 +180,8 @@ int bindsock(Transaction* trans, const char* str)
 		return -2;
 	}
 
-	err = bind(trans->trans_fd, &sockaddr, sizeof(struct sockaddr_in));
+	socklen_t addrlen = sizeof(struct sockaddr_in);
+	err = bind(trans->trans_fd, &sockaddr, addrlen);
 	if (err < 0)
 	{
 		error("Failed to bind, err=%d\n", err);
@@ -188,6 +189,9 @@ int bindsock(Transaction* trans, const char* str)
 		return -2;
 	}
 	debug("Succeed to bind\n");
+
+	memcpy(&trans->trans_addr, &sockaddr, addrlen);
+	trans->trans_len = addrlen;
 
 	return 0;
 }
@@ -202,6 +206,8 @@ int listensock(Transaction* trans)
 		return -2;
 	}
 	debug("Succeed to listen\n");
+
+	trans->trans_mode = 0; // listen() makes socket passive
 
 	return 0;
 }
@@ -235,7 +241,7 @@ int acceptsock(Transaction* trans)
 	conn->conn_fd = cli_fd;
 	memcpy(&conn->conn_addr, &sockaddr, socklen);
 	conn->conn_len = socklen;
-
+	//
 	if (trans->conn_start == NULL)
 	{
 		trans->conn_start = conn;
@@ -245,7 +251,7 @@ int acceptsock(Transaction* trans)
 		trans->conn_end->nextconn = conn;
 	}
 	trans->conn_end = conn;
-
+	//
 	trans->conn_nbr ++;
 
 	return 0;
@@ -287,21 +293,79 @@ int connectsock(Transaction* trans, const char* str)
 
 void closesock(Transaction* trans)
 {
-// TODO: fix me
+// TODO: fix me - loop to close conns and self-fd
 
-	debug("(FIX ME!!)Closed the trans=%d!! pid=%d to exit!!\n",
-		trans->trans_fd, getpid());
+	debug("Closed the trans=%d\n", trans->trans_fd);
+}
+
+void closeconn(Transaction* trans, TransConn* conn)
+{
+#if 0 // conn_start and conn_end not fixed well yet
+
+	if ((trans == NULL) || (conn == NULL))
+	{
+		retrun -1;
+	}
+
+	close(conn->conn_fd); // TODO: shutdown()??
+
+	if (p == NULL)
+		return;
+
+	TransConn* p = trans->conn_start;
+	if (p == conn) // 1st one to remove
+	{
+		trans->conn_start = conn->nextconn;
+
+		free(conn);
+		conn = NULL;
+
+		return;
+	}
+
+	while (p->nextconn != NULL)
+	{
+		if (p->nextconn == conn)
+		{
+			p->nextconn = conn->nextconn;
+
+			free(conn);
+			conn = NULL;
+		}
+
+		p = p->nextconn;
+	}
+#endif
 }
 
 // *******************************************************************
-static char* eventnames[] = {"NEW CONNECTION", "INCOMING MSG", "ON DISCONNECT"};
-
 char* trans_get_eventname(TransEvent evt)
 {
-	if (evt >= sizeof(eventnames)/sizeof(eventnames[0]))
-		return "unknown-event";
+	switch(evt)
+	{
+		case TransEvent_NEWCONNECTION:
+			return "NEW CONNECTION";
+		break;
+		case TransEvent_REQUEST_TIMEOUT:
+			return "REQUEST TIMEOUT";
+		break;
+		case TransEvent_RECEIVE_FAILURE:
+			return "RECEIVE FAILURE";
+		break;
+		case TransEvent_OUT_OF_MEMORY:
+			return "OUT OF MEMORY";
+		break;
+		case TransEvent_INCOMING_MSG:
+			return "INCOMING MSG";
+		break;
+		case TransEvent_ON_DISCONNECT:
+			return "ON DISCONNECT";
+		break;
+		default:
+		break;
+	}
 
-	return eventnames[evt];
+	return "<unknown trans event>";
 }
 
 static void (*notify_newevent)(TransEvent, TransConn*, char*, unsigned int) = NULL;
@@ -340,6 +404,8 @@ void transact(TransConn *conn)
 
 		totalrecv = 0;
 
+		// TODO: add a TO-management, and cb(REQUEST_TIMEOUT)
+
 		do
 		{
 			//debug("Receiving...\n"); // to check the blocking
@@ -354,6 +420,9 @@ void transact(TransConn *conn)
 			{
 				error("Failed to receive, err=%d\n", len);
 				say_errno();
+
+				//TODO: cb(RECEIVE_FAILURE)
+
 				return;
 			} // TODO: len > bufflen, possible????
 
@@ -367,6 +436,8 @@ void transact(TransConn *conn)
 			// Bufffering
 			if (totalrecv >= TOTOAL_MSG_LEN)
 			{
+				// TODO: cb(OUT_OF_MEMORY)
+
 				error("Too large message requested!!\n");
 				return;
 			}
@@ -464,7 +535,7 @@ int trans_start(int mode, char* dst) // mode "0" means Server
 			int err = acceptsock(&trans);
 			if (err != 0)
 			{
-				return -3;
+				return -2;
 			}
 
 			// Another new task created to receive the requests...
@@ -485,14 +556,19 @@ int trans_start(int mode, char* dst) // mode "0" means Server
 				if (notify_newevent)
 					notify_newevent(TransEvent_NEWCONNECTION, trans.conn_end, NULL, 0);
 
+				// --------------------------------
 				// Main receive body
 				transact(trans.conn_end);
+				// --------------------------------
 
 				if (notify_newevent)
 					notify_newevent(TransEvent_ON_DISCONNECT,trans.conn_end, NULL, 0);
 
 				// not need the "conn" anymore
+				// TODO: call closesock()
 				close(trans.conn_end->conn_fd);
+
+				// TODO: add a diagnostic way to check opened filed, allocated mem...and dump here
 
 				/* NOTE: child (client) ends, so must exit;
 				otherwise the client will loop to next accept(), which not we want */
@@ -501,6 +577,8 @@ int trans_start(int mode, char* dst) // mode "0" means Server
 			}
 			else if (pid < 0)
 			{
+				// TODO: closesock() to release added conn!!!
+
 				error("Failed to fork to accept!!\n");
 				say_errno();
 			}
@@ -513,12 +591,9 @@ int trans_start(int mode, char* dst) // mode "0" means Server
 				*/
 				close(trans.conn_end->conn_fd);
 
-				// TODO: remove from conn pool
-
 				// TODO: waitpid??
-
 				// TODO end the zombie
-				// TOOD: close any fd, especially client-fd???
+				// TODO: when a conn disconnected, call closeconn(), removed from conn-pool
 			}
 #endif
 		}

@@ -97,18 +97,27 @@ CGI_StatusCode cgi_get_statuscode(int err)
 	return http_statuslist[0];
 }
 
-//static char* cginotify[] = {"NOTIFY OK", "BAD ENV VARIANT", "CGI ERROR", "TIME OUT", "INVALID DATA", "UNKNOWN ERROR"};
-
 char* cgi_get_notifyname(int evt)
 {
-#if 1
-	return "<not identify the notify>";
-#else
-	if (evt >= sizeof(cginotify)/sizeof(cginotify[0]))
-		return "unknown-notify";
-
-	return cginotify[evt];
-#endif
+	switch(evt)
+	{
+		case CGI_NOTIFY_OK:
+			return "NOTIFY OK";
+		case CGI_NOTIFY_BAD_ENV:
+			return "BAD ENV VARIANT";
+		case CGI_NOTIFY_CGI_ERR:
+			return "CGI PROGAM ERROR";
+		case CGI_NOTIFY_BAD_REQUEST:
+			return "BAD REQUEST";
+		case CGI_NOTIFY_TOOLONG_REQUEST:
+			return "TOO LONG REQUEST";
+		case CGI_NOTIFY_TIMEOUT:
+			return "RESPOND TIME OUT";
+		case CGI_NOTIFY_INVALID_DATA:
+			return "INVALID DATA";
+	}
+	// all are (local) internal-errors, http-statuscode cannot be identified
+	return "<unknown cgi event>";
 }
 
 static int response_id = -1;
