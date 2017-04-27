@@ -52,8 +52,12 @@ int main (int argc, char* argv[], char* envp[])
 	}
 
 	// processing main-body
-	trans_addlisten(on_trans_notified);
-	trans_start((argc>1), dst);
+	Transaction* p = trans_create((argc>1), dst);
+
+	trans_addlisten(p, on_trans_notified);
+	trans_start(p);
+
+	trans_destory(p);
 
 	// cannot reach here
 

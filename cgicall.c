@@ -192,7 +192,7 @@ void cgi_run(char* envp[])
 		return;
 	}
 
-	fcntl(from_fd, F_GETFL, O_NONBLOCK); // "asyn" I/O
+	fcntl(from_fd, F_GETFL, O_NONBLOCK); // "nonblocking" I/O
 
 	// Execute CGI
 	debug("++++++++++++++++++++ cgi calling...\n");
@@ -252,7 +252,7 @@ void cgi_run(char* envp[])
 		totaloff = 0;
 		n = 1; //  count of "realloc"
 
-		// Codes below aims to "asyn" I/O as per "O_NONBLOCK" set above
+		// Codes below aims to "nonblocking" I/O as per "O_NONBLOCK" set above
 		// TOOD: double review the codes as below!!!!!
 
 		// continous reading until TO

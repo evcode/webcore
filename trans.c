@@ -370,7 +370,8 @@ char* trans_get_eventname(TransEvent evt)
 
 static void (*notify_newevent)(TransEvent, TransConn*, char*, unsigned int) = NULL;
 
-void trans_addlisten(void (*cb)(TransEvent, TransConn*, char*, unsigned int))
+void trans_addlisten(Transaction* p, 
+	void (*cb)(TransEvent, TransConn*, char*, unsigned int))
 {
 	notify_newevent = cb;
 }
@@ -493,33 +494,10 @@ void send_stress(Transaction trans)
 	}
 }
 
-int trans_start(int mode, char* dst) // mode "0" means Server
+int trans_start(Transaction* p) // mode "0" means Server
 {
-/*
-	Transaction init
-*/
 	Transaction trans;
-	memset(&trans, 0, sizeof(Transaction));
-
-	opensock(TRANS_TCP, &trans);
-	if (mode)
-	{
-		trans.trans_mode = 1; // non-zero value means Client
-//TODO: NOW the code can work!! Go to get local port from cmdline
-//		if (bindsock(&trans, "127.0.0.1:9002") !=0 ) // NOTE: +bind() to use the dedicated port
-//			return -2;
-
-		if (connectsock(&trans, dst) != 0) // TODO: test the case not on local
-			return -2;
-	}
-	else // server mode
-	{
-		if (bindsock(&trans, dst) != 0)
-			return -2;
-
-		if (listensock(&trans) != 0)
-			return -2;
-	}
+	memcpy(&trans, p, sizeof(trans));
 
 /*
 	Here we go
@@ -602,4 +580,46 @@ int trans_start(int mode, char* dst) // mode "0" means Server
 	// TODO: RELEASE the resource before leaving (return or exit)!!!
 
 	return -1;
+}
+
+Transaction* trans_create(int mode, char* dst)
+{
+/*
+	Transaction init
+*/
+	Transaction trans;
+	memset(&trans, 0, sizeof(Transaction));
+
+	opensock(TRANS_TCP, &trans);
+	if (mode)
+	{
+		trans.trans_mode = 1; // non-zero value means Client
+//TODO: NOW the code can work!! Go to get local port from cmdline
+//		if (bindsock(&trans, "127.0.0.1:9002") !=0 ) // NOTE: +bind() to use the dedicated port
+//			return -2;
+
+		if (connectsock(&trans, dst) != 0) // TODO: test the case not on local
+			return NULL;
+	}
+	else // server mode
+	{
+		if (bindsock(&trans, dst) != 0)
+			return NULL;
+
+		if (listensock(&trans) != 0)
+			return NULL;
+	}
+
+	//
+	Transaction* ptrans = malloc(sizeof(Transaction));
+	memcpy(ptrans, &trans, sizeof(Transaction));
+
+	return ptrans;
+}
+
+void trans_destory(Transaction* p)
+{
+	closesock(p);
+
+	free(p);
 }
