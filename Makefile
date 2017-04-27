@@ -1,3 +1,8 @@
+
+IO_SELECT?=1
+
+##############################################
+
 CC?=gcc
 Q?=@
 
@@ -16,6 +21,10 @@ endif
 ifeq ($(HOSTOS),macos)
 CFLAGS += -DMACOS
 #CFLAGS += -DHOSTOS=$(HOSTOS)
+endif
+
+ifeq ($(IO_SELECT),1)
+CFLAGS += -DTRANS_IO_SELECT
 endif
 
 $(TARGET):$(OBJS)

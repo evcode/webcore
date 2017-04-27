@@ -1,5 +1,4 @@
-#include "trans.h"
-#include "util.h"
+#include "trans_io.h"
 
 /*
 SYNOPSIS
@@ -45,60 +44,117 @@ ERRORS
 */
 #include <sys/select.h>
 
-#include <sys/timer.h> // for timerclear
+//#include <sys/timer.h> // for timerclear (Ubuntu only)
 
-typedef enum
+static fd_set io_rfds;
+static uint32 io_maxfd = 0;
+static uint32 io_fds[1024]; // FD_MAXSIZE on Ubuntu
+
+static TransIoReadyCb io_ready_cb = NULL;
+
+BOOL io_add(uint32 fd)
 {
-	TRANS_IO_TIMEOUT,
-	TRANS_IO_READABLE,
-	TRANS_IO_WRITEABLE,
-	TRANS_IO_EXCEPTION,
-} TRANS_IO;
+	int i;
+	for (i = 0; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++)
+	{
+		if (io_fds[i] == 0)
+		{
+			io_fds[i] = fd;
 
-void io_add(int fd)
-{
+			return TRUE;
+		}
+	}
 
+	return FALSE;
 }
 
-void io_addlisten()
+BOOL io_remove(uint32 fd)
 {
+	int i;
+	for (i = 0; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++)
+	{
+		if (io_fds[i] == fd)
+		{
+			io_fds[i] = 0;
 
+			return TRUE;
+		}
+	}
+
+	return FALSE;
+}
+
+void io_addlisten(TransIoReadyCb cb)
+{
+	io_ready_cb = cb;
+}
+
+static void _reset_fds()
+{
+	FD_ZERO(&io_rfds);
+	io_maxfd = 0;
+
+	int i;
+	for (i = 0; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++)
+	{
+		if (io_fds[i] != 0)
+		{
+			FD_SET(io_fds[i], &io_rfds);
+
+			if (io_fds[i]>io_maxfd)
+				io_maxfd = io_fds[i];
+		}
+	}
+}
+
+static void _trigger_fds(int n)
+{
+	int i, count = 0;
+	for (i = 0; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++)
+	{
+		if ((io_fds[i] != 0) && FD_ISSET(io_fds[i], &io_rfds))
+		{
+			if (io_ready_cb)
+				io_ready_cb(io_fds[i], TRANS_IO_READABLE);
+
+			count ++;
+			if (count >= n)
+				break;
+		}
+	}
 }
 
 void io_execute()
 {
 	BOOL is = TRUE;
-	int fd;
-	fd_set rfds;
-	timeval tv;
 
-	timerclear(&tv);
+	struct timeval tv;
+	//timerclear(&tv); // on Ubuntu
+	tv.tv_sec  = 5;
+	tv.tv_usec = 0;
 
 	while(is)
 	{
-		FD_ZERO(&rfds)
-		FD_SET(fd, &rfds);
+		_reset_fds();
 
-		int max_fd = fd;
-
-		int n = select(max_fd+1, &rfds, NULL, NULL, &tv);
+		int n = select(io_maxfd+1, &io_fds, NULL, NULL, &tv); // TODO: now only handle "read" detection
 		if (n < 0)
 		{
 			error("Failed to select, err=%d\n", n);
 			say_errno();
-			return; // TODO: any release below
+
+			return;
 		}
 		else if (n == 0) // TO
 		{
-			error("select timeout\n");
+			if (io_ready_cb)
+				io_ready_cb(0, TRANS_IO_TIMEOUT);
+
 			continue;
 		}
 		else
 		{
-			if (FD_ISSET(fd, &rfds))
-			{
-
-			}
+			_trigger_fds(n);
 		}
 	}
 }

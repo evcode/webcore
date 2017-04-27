@@ -376,6 +376,21 @@ void trans_addlisten(Transaction* p,
 	notify_newevent = cb;
 }
 
+TransConn* trans_find(Transaction* trans, uint32 fd)
+{
+	TransConn* conn = trans->conn_start;
+
+	while (conn != NULL)
+	{
+		if (conn->conn_fd == fd)
+			return conn;
+
+		conn = conn->nextconn;
+	}
+
+	return NULL;
+}
+
 #define TRANS_RECVBUF_SIZE 120
 #define TRANS_SENDBUF_SIZE (TRANS_RECVBUF_SIZE+8)
 
@@ -508,6 +523,9 @@ int trans_start(Transaction* p) // mode "0" means Server
 	}
 	else // Server: standby for next connection
 	{
+#ifdef TRANS_IO_SELECT
+		trans_start_io(&trans);
+#else
 		while (1)
 		{
 			int err = acceptsock(&trans);
@@ -575,11 +593,12 @@ int trans_start(Transaction* p) // mode "0" means Server
 			}
 #endif
 		}
+#endif
 	}
 
 	// TODO: RELEASE the resource before leaving (return or exit)!!!
 
-	return -1;
+	return -3;
 }
 
 Transaction* trans_create(int mode, char* dst)
