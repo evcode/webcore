@@ -46,21 +46,32 @@ ERRORS
 
 //#include <sys/timer.h> // for timerclear (Ubuntu only)
 
+#define MASTER_FD_START 0 // First one is reserved for Master
+#define GUEST_FD_START (MASTER_FD_START+1) //, and others for Guests
+
+// TODO: BE CAREFULL for thread-safe since they're all "global"!!!!!
 static fd_set io_rfds;
 static uint32 io_maxfd = 0;
 static uint32 io_fds[1024]; // FD_MAXSIZE on Ubuntu
 
 static TransIoReadyCb io_ready_cb = NULL;
 
-BOOL io_add(uint32 fd)
+BOOL io_add(uint32 fd) // add a Guest, cannot add Master
 {
+	if (fd == 0)
+	{
+		error("Invalid IO fd=%d to add\n", fd);
+		return FALSE;
+	}
+
 	int i;
-	for (i = 0; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++)
+	for (i = GUEST_FD_START; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++)
 	{
 		if (io_fds[i] == 0)
 		{
 			io_fds[i] = fd;
 
+			debug("+ IO added to listen fd=%d\n", fd);
 			return TRUE;
 		}
 	}
@@ -68,20 +79,31 @@ BOOL io_add(uint32 fd)
 	return FALSE;
 }
 
-BOOL io_remove(uint32 fd)
+BOOL io_remove(uint32 fd) // remove all Guests, exclude Master
 {
 	int i;
-	for (i = 0; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++)
+	for (i = GUEST_FD_START; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++)
 	{
 		if (io_fds[i] == fd)
 		{
 			io_fds[i] = 0;
 
+			debug("+ IO remvoed from listen fd=%d\n", fd);
 			return TRUE;
 		}
 	}
 
 	return FALSE;
+}
+
+BOOL io_remove_all() // remove all Guests, exclude Master
+{
+	uint32 srv_fd = io_fds[MASTER_FD_START];
+	memset(io_fds, 0, sizeof(io_fds));
+
+	io_fds[MASTER_FD_START] = srv_fd;
+
+	return TRUE;
 }
 
 void io_addlisten(TransIoReadyCb cb)
@@ -89,28 +111,33 @@ void io_addlisten(TransIoReadyCb cb)
 	io_ready_cb = cb;
 }
 
-static void _reset_fds()
+static void _reset_fds(struct timeval* tv)
 {
+	// reset read-fds
 	FD_ZERO(&io_rfds);
 	io_maxfd = 0;
 
 	int i;
-	for (i = 0; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++)
+	for (i = MASTER_FD_START; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++) // including Master and Guests
 	{
 		if (io_fds[i] != 0)
 		{
-			FD_SET(io_fds[i], &io_rfds);
+			FD_SET(io_fds[i], &io_rfds); // set it
 
-			if (io_fds[i]>io_maxfd)
-				io_maxfd = io_fds[i];
+			if (io_fds[i] > io_maxfd)
+				io_maxfd = io_fds[i]; // get maxfd
 		}
 	}
+
+	// reset TO
+	tv->tv_sec  = 5;
+	tv->tv_usec = 0;
 }
 
-static void _trigger_fds(int n)
+static void _trigger_fds(int n) // TODO: throw into a thread-pool, but take care about "thread-safe"
 {
 	int i, count = 0;
-	for (i = 0; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++)
+	for (i = MASTER_FD_START; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++) // including Master and Guests
 	{
 		if ((io_fds[i] != 0) && FD_ISSET(io_fds[i], &io_rfds))
 		{
@@ -124,23 +151,29 @@ static void _trigger_fds(int n)
 	}
 }
 
-void io_execute()
+void io_scan(uint32 fd)
 {
+	if (fd == 0)
+	{
+		error("Invalid (master) IO fd=%d to start\n", fd);
+		return FALSE;
+	}
+
 	BOOL is = TRUE;
 
 	struct timeval tv;
 	//timerclear(&tv); // on Ubuntu
-	tv.tv_sec  = 5;
-	tv.tv_usec = 0;
+
+	io_fds[MASTER_FD_START] = fd; // set Master fd, and will be FD_SET in _reset_fds()
 
 	while(is)
 	{
-		_reset_fds();
+		_reset_fds(&tv);
 
-		int n = select(io_maxfd+1, &io_fds, NULL, NULL, &tv); // TODO: now only handle "read" detection
+		int n = select(io_maxfd+1, &io_rfds, NULL, NULL, &tv); // TODO: now only handle "read" detection
 		if (n < 0)
 		{
-			error("Failed to select, err=%d\n", n);
+			error("Failed to select IO, err=%d\n", n);
 			say_errno();
 
 			return;
@@ -148,11 +181,11 @@ void io_execute()
 		else if (n == 0) // TO
 		{
 			if (io_ready_cb)
-				io_ready_cb(0, TRANS_IO_TIMEOUT);
+				io_ready_cb(0, TRANS_IO_TIMEOUT); // here "0" means "no fd"
 
 			continue;
 		}
-		else
+		else // "n" fds detected:
 		{
 			_trigger_fds(n);
 		}

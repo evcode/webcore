@@ -169,7 +169,7 @@ CGI_NOTIFY envlist_add(const char* str)
 	}
 
 	// Here regard it as a Warning, return "OK"
-	error("ENV: not identified <%s>\n", str);
+	debug("Warning: not identified <%s>\n", str);
 	return CGI_NOTIFY_OK;
 }
 

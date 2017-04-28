@@ -69,7 +69,7 @@ void dumpsock(int fd)
 	debug("TCP_CORK:%d\n", otpvalue);
 #endif
 
-	debug("\n");
+	printf("\n");
 }
 
 /* BSD System Calls Manual
@@ -223,7 +223,7 @@ int acceptsock(Transaction* trans)
 	socklen_t socklen = sizeof(sockaddr);
 
 	debug("pid=%d Accepting...\n", getpid());
-	int cli_fd = accept(trans->trans_fd, &sockaddr, &socklen); // TODO: added into Trans
+	int cli_fd = accept(trans->trans_fd, &sockaddr, &socklen);
 	if (cli_fd < 0)
 	{
 		error("Failed to accept, err=%d\n", cli_fd);
@@ -388,6 +388,7 @@ TransConn* trans_find(Transaction* trans, uint32 fd)
 		conn = conn->nextconn;
 	}
 
+	debug("Warning: not found fd %d in conn pool\n", fd);
 	return NULL;
 }
 
@@ -471,12 +472,13 @@ void transact(TransConn *conn)
 	}
 }
 
-void send_stress(Transaction trans)
+void perform_send(Transaction* trans)
 {
 	char transsnd[TRANS_SENDBUF_SIZE];
 	int bufflen = sizeof(transsnd), len;
 
-	while (1)
+	//while (1)
+	// NOTE: one-time send
 	{
 		memset(transsnd, 'c', sizeof(transsnd));
 
@@ -486,7 +488,7 @@ void send_stress(Transaction trans)
 #ifdef TEST_SEND_STRESS
 		debug("Sending...\n"); // to check the blocking
 #endif
-		len = send(trans.trans_fd, transsnd, bufflen, 0);// TODO: flags
+		len = send(trans->trans_fd, transsnd, bufflen, 0);// TODO: flags
 		if (len != bufflen)
 		{
 			error("Failed to send, err=%d\n", len);
@@ -501,11 +503,6 @@ void send_stress(Transaction trans)
 		//printf("%s", transsnd);
 		printf("(end)\n");
 */
-#ifdef TEST_SEND_STRESS
-		// not sleep to keep sending until next blocking
-#else
-		sleep(give_random(5)); // sleep a random sec from 1 to 5
-#endif
 	}
 }
 
@@ -519,7 +516,7 @@ int trans_start(Transaction* p) // mode "0" means Server
 */
 	if (trans.trans_mode) // Client: the transaction is requesting
 	{
-		send_stress(trans);
+		perform_send(&trans);
 	}
 	else // Server: standby for next connection
 	{
@@ -641,4 +638,34 @@ void trans_destory(Transaction* p)
 	closesock(p);
 
 	free(p);
+}
+
+// *******************************************************************
+void send_stress(char* dst)
+{
+	while (1)
+	{
+		pid_t pid = fork();
+
+		if (pid < 0)
+			return;
+
+		if (pid == 0)
+		{
+			Transaction* p = trans_create(1, dst); // "1" is Client
+
+			perform_send(p);
+
+			trans_destory(p);
+
+			exit(0); // must end the process
+		}
+		else
+		{
+			int sta;
+			waitpid(pid, &sta, WNOHANG); // TODO: correct the usage here
+		}
+
+		usleep(300);
+	}
 }

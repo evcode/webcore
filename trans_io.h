@@ -15,7 +15,8 @@ typedef BOOL (*TransIoReadyCb)(uint32 fd, TRANS_IO_EVENT evt);
 
 BOOL io_add(uint32 fd);
 BOOL io_remove(uint32 fd);
+BOOL io_remove_all();
 void io_addlisten(TransIoReadyCb cb);
-void io_execute();
+void io_scan(uint32 fd);
 
 #endif

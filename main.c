@@ -51,6 +51,11 @@ int main (int argc, char* argv[], char* envp[])
 		//signal(signum, sig_routine); // TODO: replace with "sigaction()"
 	}
 
+#ifdef TEST_SEND_STRESS
+	if (argc>1)
+		send_stress(dst); // simulate to send to Server
+#endif
+
 	// processing main-body
 	Transaction* p = trans_create((argc>1), dst);
 
