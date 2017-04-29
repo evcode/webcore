@@ -24,3 +24,15 @@ The core logical processing:
        send:  >>>>>>>>>>>>>>>>>>>>> respond Client
 
 -------------------------------------------------- */
+
+TODO List:
+* non-blocking calling
+* "close" and memory release
+* "waitpid"
+* thread-pool
+* EAGAIN...errno handling
+* memory alloc container
+
+Bug list:
+1. during runing, unused cgi is not closed??
+2. Conn fd "0" can be "accept", but cannot recv data

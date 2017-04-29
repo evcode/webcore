@@ -1,5 +1,11 @@
 #include "util.h"
 
+#ifndef DEBUG_ENVLIST
+#undef debug(x...)
+
+#define debug(x...) do {} while (0)
+#endif
+
 typedef struct
 {
 	char* http_field;

@@ -212,7 +212,7 @@ int listensock(Transaction* trans)
 	return 0;
 }
 
-int acceptsock(Transaction* trans)
+TransConn* acceptsock(Transaction* trans)
 {
 	// TODO: domain/AP_* comares with 'sockaddr' to judge. Now IPv4 ONLY
 	struct sockaddr_in sockaddr;
@@ -228,12 +228,12 @@ int acceptsock(Transaction* trans)
 	{
 		error("Failed to accept, err=%d\n", cli_fd);
 		say_errno();
-		return -2;
+		return NULL;
 	}
 
 	debug("--> New comming conn=%d (%s:%d)\n", cli_fd,
 		inet_ntoa(sockaddr.sin_addr), ntohs(sockaddr.sin_port));
-	dumpsock(cli_fd);
+	//dumpsock(cli_fd);
 
 	// Add the new client to the connection pool
 	TransConn* conn = (TransConn*)malloc(sizeof(TransConn));
@@ -254,7 +254,9 @@ int acceptsock(Transaction* trans)
 	//
 	trans->conn_nbr ++;
 
-	return 0;
+	trans_dump(trans); // Debug to dump after added
+
+	return trans->conn_end;
 }
 
 int connectsock(Transaction* trans, const char* str)
@@ -293,49 +295,120 @@ int connectsock(Transaction* trans, const char* str)
 
 void closesock(Transaction* trans)
 {
-// TODO: fix me - loop to close conns and self-fd
+	debug("Close the trans=%d\n", trans->trans_fd);
 
-	debug("Closed the trans=%d\n", trans->trans_fd);
+	// close conn-pool
+	TransConn* p = trans->conn_start;
+	while (p != NULL)
+	{
+		close(p->conn_fd);
+		//
+		TransConn* tmp = p;
+		p = p->nextconn;
+		free(tmp);
+		tmp = NULL;
+	}
+
+	trans->conn_start = NULL;
+	trans->conn_end = NULL;
+	trans->conn_nbr = 0;
+
+	// close server
+	close(trans->trans_fd);
+	//
+	free(trans);
+	trans = NULL;
 }
 
-void closeconn(Transaction* trans, TransConn* conn)
+void closeconn(Transaction* trans, TransConn* conn) // TOOD: double check codes below, especially conn_start and end!!!
 {
-#if 0 // conn_start and conn_end not fixed well yet
+	debug("Close the trans fd=%d's conn fd=%d\n", trans->trans_fd, conn->conn_fd);
 
 	if ((trans == NULL) || (conn == NULL))
 	{
-		retrun -1;
+		error("Invalid connection to close\n");
+		return;
 	}
 
-	close(conn->conn_fd); // TODO: shutdown()??
-
-	if (p == NULL)
-		return;
-
-	TransConn* p = trans->conn_start;
-	if (p == conn) // 1st one to remove
+	if (trans->conn_start == conn) // if 1st one to remove
 	{
+		trans->conn_nbr --;
+		// close fd
+		close(conn->conn_fd); // TODO: shutdown()??
+		// remove from conn-pool and release
 		trans->conn_start = conn->nextconn;
-
 		free(conn);
 		conn = NULL;
 
+		trans_dump(trans); // Debug to dump after removed
 		return;
 	}
 
+	TransConn* p = trans->conn_start;
 	while (p->nextconn != NULL)
 	{
 		if (p->nextconn == conn)
 		{
+			trans->conn_nbr --;
+			// close fd
+			close(conn->conn_fd); // TODO: shutdown()??
+			// remove from conn-pool and release
+			if (trans->conn_end == conn) // if last one to remove
+			{
+				trans->conn_end = p;
+			}
 			p->nextconn = conn->nextconn;
-
 			free(conn);
 			conn = NULL;
+
+			trans_dump(trans); // Debug to dump after removed
+			return;
 		}
 
 		p = p->nextconn;
 	}
-#endif
+
+	debug("Warning: No connection closed\n");
+}
+
+TransConn* trans_find(Transaction* trans, uint32 fd)
+{
+	TransConn* conn = trans->conn_start;
+
+	while (conn != NULL)
+	{
+		if (conn->conn_fd == fd)
+			return conn;
+
+		conn = conn->nextconn;
+	}
+
+	debug("Warning: not found fd %d in conn pool\n", fd);
+	return NULL;
+}
+
+void trans_dump(Transaction* trans)
+{
+	if (trans == NULL)
+		error("Invalid Trans to dump\n");
+
+	debug("Dump of Connection-pool (num=%d) of the Trans fd=%d:\n", trans->conn_nbr, trans->trans_fd);
+	printf("Index     fd     Connection\n");
+	printf("----------------------------------\n");
+	int cnt = 0;
+	struct sockaddr_in *in;
+	TransConn* conn = trans->conn_start;
+	while (conn != NULL)
+	{
+		in = (struct sockaddr_in*)&conn->conn_addr;
+		printf("%5d  %5d     %s:%d\n", cnt, conn->conn_fd, inet_ntoa(in->sin_addr), ntohs(in->sin_port));
+
+		conn = conn->nextconn;
+		cnt ++;
+	}
+
+	if (trans->conn_nbr != cnt)
+		error("Dismatched connection count (%d!=%d)\n", trans->conn_nbr,cnt);
 }
 
 // *******************************************************************
@@ -374,22 +447,6 @@ void trans_addlisten(Transaction* p,
 	void (*cb)(TransEvent, TransConn*, char*, unsigned int))
 {
 	notify_newevent = cb;
-}
-
-TransConn* trans_find(Transaction* trans, uint32 fd)
-{
-	TransConn* conn = trans->conn_start;
-
-	while (conn != NULL)
-	{
-		if (conn->conn_fd == fd)
-			return conn;
-
-		conn = conn->nextconn;
-	}
-
-	debug("Warning: not found fd %d in conn pool\n", fd);
-	return NULL;
 }
 
 #define TRANS_RECVBUF_SIZE 120
@@ -443,7 +500,7 @@ void transact(TransConn *conn)
 				return;
 			} // TODO: len > bufflen, possible????
 
-			debug("pid=%d Server receive %d bytes<<\n", getpid(), len);
+			debug("pid=%d Server received %d bytes<<\n", getpid(), len);
 /*			int i;
 			for (i = 0; i < len; i++)
 				printf("%c", transrecv[i]);
@@ -525,16 +582,16 @@ int trans_start(Transaction* p) // mode "0" means Server
 #else
 		while (1)
 		{
-			int err = acceptsock(&trans);
-			if (err != 0)
+			TransConn* conn = acceptsock(&trans);
+			if (conn == NULL)
 			{
 				return -2;
 			}
 
 			// Another new task created to receive the requests...
+			// NOTE: "conn" is just the newly accepted Client
 #if 0
-			// NOTE: "conn_end->conn_fd" is just the new accepted Client
-			new_task(transact, trans.conn_end->conn_fd);
+			new_task(transact, conn->conn_fd);
 #else
 			int pid = fork();
 			if (pid == 0)
@@ -547,19 +604,18 @@ int trans_start(Transaction* p) // mode "0" means Server
 				close(trans.trans_fd);
 
 				if (notify_newevent)
-					notify_newevent(TransEvent_NEWCONNECTION, trans.conn_end, NULL, 0);
+					notify_newevent(TransEvent_NEWCONNECTION, conn, NULL, 0);
 
 				// --------------------------------
 				// Main receive body
-				transact(trans.conn_end);
+				transact(conn);
 				// --------------------------------
 
 				if (notify_newevent)
-					notify_newevent(TransEvent_ON_DISCONNECT,trans.conn_end, NULL, 0);
+					notify_newevent(TransEvent_ON_DISCONNECT, conn, NULL, 0);
 
 				// not need the "conn" anymore
-				// TODO: call closesock()
-				close(trans.conn_end->conn_fd);
+				closeconn(&trans, conn);
 
 				// TODO: add a diagnostic way to check opened filed, allocated mem...and dump here
 
@@ -582,7 +638,7 @@ int trans_start(Transaction* p) // mode "0" means Server
 				/*
 					NOTE: in Parent process do close the Child "fd"
 				*/
-				close(trans.conn_end->conn_fd);
+				close(conn->conn_fd);
 
 				// TODO: waitpid??
 				// TODO end the zombie

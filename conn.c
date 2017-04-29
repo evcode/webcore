@@ -8,7 +8,7 @@ extern CGI_StatusCode cgi_get_statuscode(int err); // on MACOS compiling error: 
 
 void on_cgi_notified(int fd, int err, char* s, int n) // "s" is the Content inform
 {
-	debug("On new CGI notified=%s (%d bytes)\n", cgi_get_notifyname(err), n);
+	debug("On new CGI notified=%s(%d), %d bytes\n", cgi_get_notifyname(err), err, n);
 /*
 	int i;
 	for (i = 0; i < n; i ++)
@@ -153,7 +153,7 @@ void on_trans_notified(TransEvent evt, TransConn* conn, char* s, unsigned int l)
 		error("Invalid trans %x message(%d)\n", conn, evt);
 		return;
 	}
-	debug("On new trans event=%s (%d bytes)\n", trans_get_eventname(evt), l);
+	debug("On new Trans event=%s(%d), %d bytes\n", trans_get_eventname(evt), evt, l);
 
 	switch (evt)
 	{

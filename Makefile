@@ -1,8 +1,8 @@
 
 IO_SELECT?=1
+DEBUG_ENVLIST?=0
 
 ##############################################
-
 CC?=gcc
 Q?=@
 
@@ -26,6 +26,10 @@ endif
 
 ifeq ($(IO_SELECT),1)
 CFLAGS += -DTRANS_IO_SELECT
+endif
+
+ifeq ($(DEBUG_ENVLIST),1)
+CFLAGS += -DDEBUG_ENVLIST
 endif
 
 $(TARGET):$(OBJS)

@@ -96,4 +96,10 @@ typedef enum  // TODO: do edit "trans_get_eventname()" if update here!!
 
 typedef void* TransDesc;
 
+char* trans_get_eventname(TransEvent evt);
+TransConn* acceptsock(Transaction* trans);
+Transaction* trans_create(int mode, char* dst);
+TransConn* trans_find(Transaction* trans, unsigned int fd);
+void trans_dump(Transaction* trans);
+
 #endif

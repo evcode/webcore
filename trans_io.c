@@ -156,7 +156,7 @@ void io_scan(uint32 fd)
 	if (fd == 0)
 	{
 		error("Invalid (master) IO fd=%d to start\n", fd);
-		return FALSE;
+		return;
 	}
 
 	BOOL is = TRUE;

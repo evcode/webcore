@@ -19,14 +19,14 @@ static BOOL _process_trans_io(uint32 fd, TRANS_IO_EVENT evt)
 			{
 				debug("+ IO Readable-event, master fd=%d\n", fd);
 
-				int err = acceptsock(curr_trans);
-				if (err != 0)
+				TransConn* conn = acceptsock(curr_trans);
+				if (conn == NULL)
 				{
 					break;
 				}
 
 				// add the new conn into fd "select"
-				io_add(curr_trans->conn_end->conn_fd);
+				io_add(conn->conn_fd);
 			}
 			else // (remote) conn fd
 			{
@@ -38,7 +38,7 @@ static BOOL _process_trans_io(uint32 fd, TRANS_IO_EVENT evt)
 					transact(p);
 					
 					// remove the conn for select
-					close(p->conn_fd);
+					closeconn(curr_trans, p);
 				}
 
 				io_remove(fd);
