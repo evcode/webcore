@@ -168,6 +168,16 @@ void cgi_addlisten(int id, void(*cb)(int id, int err, char* msg, int len))
 #include <unistd.h> // for pipe(), dup, etc
 					// + STDIN_FILENO、STDOUT_FILENO and STDERR_FILENO
 
+typedef union
+{
+	int fds[2];
+	struct
+	{
+		int r; // mapping to fds[0]
+		int w; // mapping to fds[1]
+	} pair;
+} PipeDesc;
+
 void cgi_run(char* envp[])
 {
 	int tocgi[2]; // server channels to cgi
@@ -177,13 +187,6 @@ void cgi_run(char* envp[])
     miniweb (w tocgi[1])------------->>(r tocgi[0])   cgi
     miniweb (r fromcgi[0])<<-----------(w fromcgi[1]) cgi
     */
-	int to_fd = pipe(tocgi);
-	if (to_fd < 0)
-	{
-		error("Failed to pipe!!\n");
-		say_errno();
-		return;
-	}
 	int from_fd = pipe(fromcgi);//pipe2(fromcgi, O_NONBLOCK);// now MACOS has no pipe2, replace to use fcntl
 	if (from_fd < 0)
 	{
@@ -192,7 +195,18 @@ void cgi_run(char* envp[])
 		return;
 	}
 
-	fcntl(from_fd, F_GETFL, O_NONBLOCK); // "nonblocking" I/O
+	// Configure CGI pipe fds
+	int rfd = fromcgi[0];
+	int flags = fcntl(rfd, F_GETFL, 0);
+	flags |= O_NONBLOCK; // set "nonblocking"
+	//flags &= ~O_NONBLOCK; // blocking
+	fcntl(rfd, F_SETFL, flags);
+	debug("CGI pipe status flags=%08x, (O_NONBLOCK:%08x)\n", flags, O_NONBLOCK);
+
+	flags = fcntl(rfd, F_GETFD);
+	flags |= FD_CLOEXEC;
+	fcntl(rfd, F_SETFD, flags);
+	debug("CGI pipe desc flags=%08x, (FD_CLOEXEC:%08x)\n", flags, FD_CLOEXEC);
 
 	// Execute CGI
 	debug("++++++++++++++++++++ cgi calling...\n");
@@ -217,6 +231,11 @@ void cgi_run(char* envp[])
 		close(STDIN_FILENO);
 		//dup2(fromcgi[0], STDIN_FILENO);
 
+		/* see also above, close it
+			no need Read in Child
+		*/
+		close(fromcgi[0]);
+
 		/*
 			hereafter all STDIN input in Child will be redirected into pipe!!
 			hence, printf for Debug is forbidden to avoid garbage info. sent
@@ -228,6 +247,8 @@ void cgi_run(char* envp[])
 		int exe = execve(exec, argv, envp);
 
 		// NOTE: cannot reach here; otherwise it's error
+		close(fromcgi[1]);
+
 		{
 			char cgistr[128]; // NOTE: output into pipe - see also the error-check below!!
 			sprintf(cgistr, "%s:%d:%s", CGI_ERROR, CGI_NOTIFY_CGI_ERR, "CGI program is not ready");
@@ -237,10 +258,15 @@ void cgi_run(char* envp[])
 	}
 	else // parent: pipe receive
 	{
+		/*
+			no need Write in Parent
+		*/
+		close(fromcgi[1]);
+
 		#define CGI_RESPONSE_LEN 256
 		char* totalread = malloc(CGI_RESPONSE_LEN);
 		unsigned int totaloff = 0, n = 1, remaining;
-		unsigned int rlen;
+		int32 rlen; // FxCK! as "return" of read(), it must be "signed"!!!
 
 		int to = 5, per = 100; // set 5*100 TO to wait "cgi" responding
 
@@ -286,14 +312,25 @@ void cgi_run(char* envp[])
 
 			// TODO: any sleep here??? to release timeslice
 		}
+		// end the Read
+		close(fromcgi[0]);
+
 		printf("\n"); // end of "." above
-		debug("Totally %d bytes received from cgi\n", totaloff);
+		debug("Totally %d bytes (to=%d left) received from cgi\n", totaloff, to);
 
 		// reading done, and respond it
 		if (response_cb)
 		{
 			char* desc;
-			if (totaloff > 0)
+
+			// NOTE: Do judge TO firstly due to un"SIGNED" judge!!!!!
+			// : "totaloff" is uint32, which can just handle "rlen=-1" as > 0
+			if (to == 0)
+			{
+				desc = "Timeout to wait CGI responding";
+				response_cb(response_id, CGI_NOTIFY_TIMEOUT, desc, strlen(desc));
+			}
+			else if (totaloff > 0) // NOTE: here cannot handle "totaloff" is negative!!!!!
 			{
 				if (str_startwith(totalread, CGI_ERROR)) // format is "CGI_ERROR:2:CGI is not ready!!"
 				{
@@ -331,11 +368,6 @@ void cgi_run(char* envp[])
 				else
 					response_cb(response_id, CGI_NOTIFY_OK, totalread, totaloff); // TODO: if cb inside is BLOCKING, efficiency is low!! Improve
 			}
-			else if (to == 0)
-			{
-				desc = "Timeout to wait CGI responding";
-				response_cb(response_id, CGI_NOTIFY_TIMEOUT, desc, strlen(desc));
-			}
 			else if (totaloff == 0)
 			{
 				desc = "Invalid data retrieved from CGI";
@@ -347,10 +379,6 @@ void cgi_run(char* envp[])
 
 		// TODO: waitpid??
 	}
-
-	// TODO: such close pipe is OK??? how about in forked process??
-	close(to_fd);
-	close(from_fd);
 
 	debug("-------------------- cgi completed!!\n\n");
 }

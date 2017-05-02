@@ -4,7 +4,7 @@
 static Transaction* curr_trans; // TODO: thread-safe
 // TODO: be carefull where the pointer points to, Stack or others????
 
-static BOOL _process_trans_io(uint32 fd, TRANS_IO_EVENT evt)
+static BOOL _process_trans_io(int32 fd, TRANS_IO_EVENT evt)
 {
 	if (curr_trans == NULL)
 	{

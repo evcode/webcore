@@ -46,62 +46,74 @@ ERRORS
 
 //#include <sys/timer.h> // for timerclear (Ubuntu only)
 
-#define MASTER_FD_START 0 // First one is reserved for Master
-#define GUEST_FD_START (MASTER_FD_START+1) //, and others for Guests
+#define MASTER_FDINDEX 0 // It's Index - first one is reserved for Master
+#define GUEST_FDINDEX (MASTER_FDINDEX+1) //, and others for Guests
+
+#define INVALID_FD (-1) // in theory "0" is valid fd
 
 // TODO: BE CAREFULL for thread-safe since they're all "global"!!!!!
-static fd_set io_rfds;
-static uint32 io_maxfd = 0;
-static uint32 io_fds[1024]; // FD_MAXSIZE on Ubuntu
+static fd_set io_rset, io_wset, io_eset;
+static int32 io_maxfd = 0;
+// TODO: FD_MAXSIZE on Ubuntu,or check with sizeof(fd_set)
+static int8* io_fds = NULL;
+static uint32 io_fdlen = 0;
 
 static TransIoReadyCb io_ready_cb = NULL;
 
-BOOL io_add(uint32 fd) // add a Guest, cannot add Master
+BOOL io_add(int32 fd) // add a Guest, cannot add Master
 {
-	if (fd == 0)
+	if (fd <= INVALID_FD)
 	{
 		error("Invalid IO fd=%d to add\n", fd);
 		return FALSE;
 	}
 
 	int i;
-	for (i = GUEST_FD_START; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++)
+	for (i = GUEST_FDINDEX; i < io_fdlen; i ++)
 	{
-		if (io_fds[i] == 0)
+		if (io_fds[i] == INVALID_FD) // available position "i"
 		{
-			io_fds[i] = fd;
+			io_fds[i] = fd; // TODO: duplicate fds?????
 
 			debug("+ IO added to listen fd=%d\n", fd);
 			return TRUE;
 		}
 	}
 
+	error("+ No more available IO resource to add\n");
 	return FALSE;
 }
 
-BOOL io_remove(uint32 fd) // remove all Guests, exclude Master
+BOOL io_remove(int32 fd) // remove all Guests, exclude Master
 {
+	if (fd <= INVALID_FD)
+	{
+		error("Invalid IO fd=%d to remove\n", fd);
+		return FALSE;
+	}
+
 	int i;
-	for (i = GUEST_FD_START; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++)
+	for (i = GUEST_FDINDEX; i < io_fdlen; i ++)
 	{
 		if (io_fds[i] == fd)
 		{
-			io_fds[i] = 0;
+			io_fds[i] = INVALID_FD; // reset
 
 			debug("+ IO remvoed from listen fd=%d\n", fd);
-			return TRUE;
+			return TRUE; // TODO: duplicate fds?????
 		}
 	}
 
+	debug("+ Warning: no IO fd removed\n");
 	return FALSE;
 }
 
 BOOL io_remove_all() // remove all Guests, exclude Master
 {
-	uint32 srv_fd = io_fds[MASTER_FD_START];
-	memset(io_fds, 0, sizeof(io_fds));
+	int32 srv_fd = io_fds[MASTER_FDINDEX];
+	memset(io_fds, INVALID_FD, io_fdlen);
 
-	io_fds[MASTER_FD_START] = srv_fd;
+	io_fds[MASTER_FDINDEX] = srv_fd;
 
 	return TRUE;
 }
@@ -114,15 +126,15 @@ void io_addlisten(TransIoReadyCb cb)
 static void _reset_fds(struct timeval* tv)
 {
 	// reset read-fds
-	FD_ZERO(&io_rfds);
+	FD_ZERO(&io_rset);
 	io_maxfd = 0;
 
 	int i;
-	for (i = MASTER_FD_START; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++) // including Master and Guests
+	for (i = MASTER_FDINDEX; i < io_fdlen; i ++) // including Master and Guests
 	{
-		if (io_fds[i] != 0)
+		if (io_fds[i] != INVALID_FD)
 		{
-			FD_SET(io_fds[i], &io_rfds); // set it
+			FD_SET(io_fds[i], &io_rset); // set it
 
 			if (io_fds[i] > io_maxfd)
 				io_maxfd = io_fds[i]; // get maxfd
@@ -137,9 +149,9 @@ static void _reset_fds(struct timeval* tv)
 static void _trigger_fds(int n) // TODO: throw into a thread-pool, but take care about "thread-safe"
 {
 	int i, count = 0;
-	for (i = MASTER_FD_START; i < sizeof(io_fds)/sizeof(io_fds[0]); i ++) // including Master and Guests
+	for (i = MASTER_FDINDEX; i < io_fdlen; i ++) // including Master and Guests
 	{
-		if ((io_fds[i] != 0) && FD_ISSET(io_fds[i], &io_rfds))
+		if ((io_fds[i] != INVALID_FD) && FD_ISSET(io_fds[i], &io_rset))
 		{
 			if (io_ready_cb)
 				io_ready_cb(io_fds[i], TRANS_IO_READABLE);
@@ -151,26 +163,36 @@ static void _trigger_fds(int n) // TODO: throw into a thread-pool, but take care
 	}
 }
 
-void io_scan(uint32 fd)
+void io_scan(int32 fd)
 {
-	if (fd == 0)
+	if (fd <= INVALID_FD)
 	{
 		error("Invalid (master) IO fd=%d to start\n", fd);
 		return;
 	}
 
-	BOOL is = TRUE;
+	/*
+		Init fds-list and master fd
+	*/
+	io_fdlen = sizeof(fd_set)*8;
+	debug("+ IO fd_set length has %d BITs\n", io_fdlen);
+	if (io_fds == NULL)
+		io_fds = malloc(io_fdlen);
 
+	memset(io_fds, INVALID_FD, io_fdlen); // mandatory init - all "-1"
+	io_fds[MASTER_FDINDEX] = fd; // set Master fd, and will be FD_SET in _reset_fds()
+
+	/*
+		IO-fds processing
+	*/
+	BOOL is = TRUE;
 	struct timeval tv;
 	//timerclear(&tv); // on Ubuntu
-
-	io_fds[MASTER_FD_START] = fd; // set Master fd, and will be FD_SET in _reset_fds()
-
 	while(is)
 	{
 		_reset_fds(&tv);
 
-		int n = select(io_maxfd+1, &io_rfds, NULL, NULL, &tv); // TODO: now only handle "read" detection
+		int n = select(io_maxfd+1, &io_rset, NULL, NULL, &tv); // TODO: now only handle "read" detection
 		if (n < 0)
 		{
 			error("Failed to select IO, err=%d\n", n);
@@ -181,7 +203,7 @@ void io_scan(uint32 fd)
 		else if (n == 0) // TO
 		{
 			if (io_ready_cb)
-				io_ready_cb(0, TRANS_IO_TIMEOUT); // here "0" means "no fd"
+				io_ready_cb(INVALID_FD, TRANS_IO_TIMEOUT); // here "0" means "no fd"
 
 			continue;
 		}

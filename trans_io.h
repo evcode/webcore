@@ -11,12 +11,12 @@ typedef enum
 	TRANS_IO_EXCEPTION
 } TRANS_IO_EVENT;
 
-typedef BOOL (*TransIoReadyCb)(uint32 fd, TRANS_IO_EVENT evt);
+typedef BOOL (*TransIoReadyCb)(int32 fd, TRANS_IO_EVENT evt);
 
-BOOL io_add(uint32 fd);
-BOOL io_remove(uint32 fd);
+BOOL io_add(int32 fd);
+BOOL io_remove(int32 fd);
 BOOL io_remove_all();
 void io_addlisten(TransIoReadyCb cb);
-void io_scan(uint32 fd);
+void io_scan(int32 fd);
 
 #endif

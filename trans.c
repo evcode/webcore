@@ -123,6 +123,7 @@ int opensock(TRANS_TYPE type, Transaction* trans)
 	proto  = 0; // TODO: CHECK how to match in kernel
 	debug("Creation of domain=%d, socktype=%d, proto=%d\n", domain, socktype, proto);
 
+	// from 2.6.27 we apply "socktype|SOCK_NONBLOCK|SOCK_CLOEXEC", then no need fcntl() calling later
 	int fd = socket(domain, socktype, proto);
 	if (fd < 0)
 	{
