@@ -258,6 +258,8 @@ void cgi_run(char* envp[])
 	}
 	else // parent: pipe receive
 	{
+		debug("Forked the process %d\n", newpid);
+
 		/*
 			no need Write in Parent
 		*/

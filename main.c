@@ -18,6 +18,35 @@ static int system_le()
 	return (*(char*)&a);
 }
 
+static void sig_routine2(int sig)
+{
+	if (sig == SIGCHLD)
+	{
+		debug("* SIGCHLD captured\n");
+
+		int rtn;
+		do
+		{
+			rtn = waitpid(-1, NULL, WNOHANG); // TODO: handle Status, following a better usage
+
+			debug("* --> Process %d done\n", rtn);
+		} while (rtn == 0);
+
+		debug("* All Zombines processed\n");
+	}
+}
+
+static void install_signals()
+{
+	int signum = 0;
+	for (signum = 0; signum <= 30; signum ++) // a test - actually no need install so many
+	{
+		//signal(signum, sig_routine); // TODO: replace with "sigaction()"
+	}
+
+	signal(SIGCHLD, sig_routine2); // TODO: replace with "sigaction()"
+}
+
 int main (int argc, char* argv[], char* envp[])
 {
 #if 0 // http analysis TEST
@@ -43,13 +72,9 @@ int main (int argc, char* argv[], char* envp[])
 		printf("%s ", envp[i]);
 	printf("\n\n");
 
-	char * dst = "ANY";//"192.168.100.218:3000" "ANY" // TODO: read from cmdline
+	install_signals();
 
-	int signum = 0;
-	for (signum = 0; signum <= 30; signum ++) // a test - actually no need install so many
-	{
-		//signal(signum, sig_routine); // TODO: replace with "sigaction()"
-	}
+	char * dst = "ANY";//"192.168.100.218:3000" "ANY" // TODO: read from cmdline
 
 #ifdef TEST_SEND_STRESS
 	if (argc>1)

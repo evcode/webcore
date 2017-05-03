@@ -1,7 +1,8 @@
 
 /* --------------------------------------------------
-The core logical processing:
+The core logical processing
 
+>> Regular:
    main
     |
 ->accept
@@ -15,7 +16,7 @@ The core logical processing:
          |
          |fork
          |  \
-         |   \-----"cgi"
+         |   \----> CGI
          |           |
        read <-pipe- stdin
          |
@@ -23,16 +24,52 @@ The core logical processing:
          |
        send:  >>>>>>>>>>>>>>>>>>>>> respond Client
 
+
+>> IO select:
+       main
+        |
+----> select
+|       |
+|     accept
+|       |
+|      recv
+|       |  \fork
+|       |   \---> CGI
+|       |          |
+|      read <---- stdin
+|       |
+|    (next recv...)
+|_______|
+
+, and:
+    cgi    main+conn    trans        io
+     .         |          |          |
+     .         |--------->|------->select <--------|
+     .         |          |          $             |
+     .         |       accept<-------|             |
+     .         |          $          |             |
+     .         |          |--------->| add fd      |
+     .         |          |          |             |
+     .         |        recv<--------|             |
+     .         |          $          |             |
+     .<--fork--|<---------|          |             |
+     .        read        |          |             |
+     .         $          |          |             |
+     .------->send        |          |             |
+     .         $          |          |             |
+     .         |--------->|--------->| rm fd       |
+     .         |          |          |-------------|
+     .         |          |          |
+
 -------------------------------------------------- */
 
 TODO List:
 * non-blocking calling
+* thread-pool
+* epoll
+* libevent
+
 * "close" and memory release
 * "waitpid"
-* thread-pool
 * EAGAIN...errno handling
 * memory alloc container
-
-Bug list:
-1. during runing, unused cgi is not closed??
-2. Conn fd "0" can be "accept", but cannot recv data
