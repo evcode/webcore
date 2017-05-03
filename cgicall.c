@@ -268,7 +268,7 @@ void cgi_run(char* envp[])
 		unsigned int totaloff = 0, n = 1, remaining;
 		int32 rlen; // FxCK! as "return" of read(), it must be "signed"!!!
 
-		int to = 5, per = 100; // set 5*100 TO to wait "cgi" responding
+		int to = 5, per = 100*1000; // totally 500ms TO to wait "cgi" responding
 
 		/*
 			TODO: any optimization can do below?!
