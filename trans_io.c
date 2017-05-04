@@ -1,3 +1,4 @@
+#ifdef TRANS_IO_SELECT
 #include "trans_io.h"
 
 /*
@@ -231,3 +232,4 @@ void io_scan(int32 fd)
 
 	// TODO: release the resources
 }
+#endif

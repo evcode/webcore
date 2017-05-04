@@ -1,5 +1,7 @@
 
-IO_SELECT?=1
+#TRANS_IO?=TRANS_IO_SELECT
+TRANS_IO?=TRANS_IO_EPOLL
+
 DEBUG_ENVLIST?=0
 
 ##############################################
@@ -24,8 +26,9 @@ CFLAGS += -DMACOS
 #CFLAGS += -DHOSTOS=$(HOSTOS)
 endif
 
-ifeq ($(IO_SELECT),1)
-CFLAGS += -DTRANS_IO_SELECT
+ifdef TRANS_IO
+CFLAGS += -DTRANS_IO
+CFLAGS += -D$(TRANS_IO)
 endif
 
 ifeq ($(DEBUG_ENVLIST),1)

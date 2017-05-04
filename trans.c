@@ -578,7 +578,7 @@ int trans_start(Transaction* p) // mode "0" means Server
 	}
 	else // Server: standby for next connection
 	{
-#ifdef TRANS_IO_SELECT
+#ifdef TRANS_IO
 		trans_start_io(&trans);
 #else
 		while (1)
