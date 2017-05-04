@@ -4,7 +4,7 @@
 
 #include <fcntl.h> // for "open"
 #include <unistd.h> // stdin/out fd
-
+#include <sys/stat.h>
 
 void cgierr(int err, char* desc)
 {
@@ -64,6 +64,11 @@ int main(int argc, char* argv[])
 	}
 	else
 	{
+		struct stat info;
+		stat(path, &info);
+		if (S_ISDIR(info.st_mode))
+			path = "../www/index.html"; // TODO: absolute base + Relative addr
+
 		int fd = open(path, O_RDONLY);
 		if (fd < 0)
 		{

@@ -18,6 +18,7 @@ static int system_le()
 	return (*(char*)&a);
 }
 
+#include <signal.h>
 static void sig_routine2(int sig)
 {
 	if (sig == SIGCHLD)

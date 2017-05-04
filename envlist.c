@@ -118,7 +118,7 @@ CGI_NOTIFY envlist_add(const char* str)
 					pathlen = end - substr;
 				}
 
-				int localpath_len = strlen(HTTP_LOCAL_PATH);
+				int localpath_len = strlen(HTTP_LOCAL_PATH); // TODO: left the local absolute Base in CGI program, not here!!!
 				if (pathlen >= HTTP_URL_LEN-localpath_len) // reserve for local path and '\0'
 				{
 					debug("ERROR: URL is too long\n");
