@@ -1,6 +1,6 @@
 
-#TRANS_IO?=TRANS_IO_SELECT
-TRANS_IO?=TRANS_IO_EPOLL
+#TRANS_IO?=IO_SELECT
+TRANS_IO?=IO_EPOLL
 
 DEBUG_ENVLIST?=0
 
@@ -11,7 +11,9 @@ Q?=@
 TARGET=miniweb
 
 # all *.c here
-SRCS=$(wildcard *.c)
+ALL_SRCS=$(wildcard *.c)
+# excludes some files
+SRCS=$(filter-out $(EXCLUDES), $(ALL_SRCS))
 # in list $(SRCS) replace *.c as *.o
 OBJS=$(patsubst %.c,%.o,$(SRCS))
 
@@ -26,9 +28,17 @@ CFLAGS += -DMACOS
 #CFLAGS += -DHOSTOS=$(HOSTOS)
 endif
 
-ifdef TRANS_IO
-CFLAGS += -DTRANS_IO
-CFLAGS += -D$(TRANS_IO)
+ifeq ($(TRANS_IO),IO_SELECT)
+CFLAGS += -DTRANS_IO=$(TRANS_IO)
+# it's EXCLUDE!!!
+EXCLUDES=trans_epoll.c
+else ifeq ($(TRANS_IO),IO_EPOLL)
+CFLAGS += -DTRANS_IO=$(TRANS_IO)
+# it's EXCLUDE!!!
+EXCLUDES=trans_io.c
+else
+# it's EXCLUDE!!!
+EXCLUDES=trans_epoll.c trans_io.c trans_io_impl.c
 endif
 
 ifeq ($(DEBUG_ENVLIST),1)
@@ -56,6 +66,7 @@ killall:
 	ps -ef|grep $(TARGET)|grep -v grep|cut -c 9-11|xargs sudo kill -9
 
 dump:
+	@echo "ALL =$(ALL_SRCS)"
 	@echo "SRCS=$(SRCS)"
 	@echo "OBJS=$(OBJS)"
 	@echo "CFLAGS=$(CFLAGS)"

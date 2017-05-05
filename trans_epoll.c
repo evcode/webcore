@@ -1,4 +1,3 @@
-#ifdef TRANS_IO_EPOLL
 #include "trans_io.h"
 
 #include <sys/epoll.h>
@@ -212,4 +211,3 @@ void io_scan(int32 fd)
 
 	return FALSE;
 }
-#endif
