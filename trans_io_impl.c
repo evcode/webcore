@@ -32,6 +32,12 @@ static BOOL _process_trans_io(int32 fd, TRANS_IO_EVENT evt)
 			{
 				debug("+ IO Readable-event, guest fd=%d\n", fd);
 
+				/* NOTE: Do remove io-monitor before to close fd; otherwise epoll_ctl(DEL) will error:
+				in trans_io the "remove" is a logical processing, 
+				but it calls into Kernel in trans_epoll - fd does not exist if it's closed before!!
+				*/
+				io_remove(fd);
+
 				TransConn* p = trans_find(curr_trans, fd); // TODO: OPTIMIZE!!! it's O(n) now!!!
 				if (p != NULL)
 				{
@@ -40,8 +46,6 @@ static BOOL _process_trans_io(int32 fd, TRANS_IO_EVENT evt)
 					// remove the conn for select
 					closeconn(curr_trans, p);
 				}
-
-				io_remove(fd);
 			}
 		break;
 
