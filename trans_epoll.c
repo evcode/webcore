@@ -244,5 +244,5 @@ void io_scan(int32 fd)
 		}
 	}
 
-	return TRUE;
+  // todo: release resources
 }

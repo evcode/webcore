@@ -51,7 +51,7 @@ ERRORS
 // TODO: BE CAREFULL for thread-safe since they're all "global"!!!!!
 static fd_set io_rset, io_wset, io_eset;
 // TODO: FD_MAXSIZE on Ubuntu,or check with sizeof(fd_set)
-static int8* io_fds = NULL;
+static int8* io_fds = NULL; // a "fd" list, including stdin 0, stdout 1 and stderr 2
 static uint32 io_fdlen = 0; // total max length
 static uint32 io_fdnum = 0; // current count
 

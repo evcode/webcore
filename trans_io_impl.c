@@ -34,8 +34,7 @@ static BOOL _process_trans_io(int32 fd, TRANS_IO_EVENT evt)
 
 				/* NOTE: Do remove io-monitor before to close fd; otherwise epoll_ctl(DEL) will error:
 				in trans_io the "remove" is a logical processing, 
-				but it calls into Kernel in trans_epoll - fd does not exist if it's closed before!!
-				*/
+				but it calls into Kernel in trans_epoll - fd does not exist if it's closed before!! */
 				io_remove(fd);
 
 				TransConn* p = trans_find(curr_trans, fd); // TODO: OPTIMIZE!!! it's O(n) now!!!

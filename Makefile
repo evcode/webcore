@@ -26,6 +26,8 @@ endif
 ifeq ($(HOSTOS),macos)
 CFLAGS += -DMACOS
 #CFLAGS += -DHOSTOS=$(HOSTOS)
+
+TRANS_IO=IO_SELECT
 endif
 
 ifeq ($(TRANS_IO),IO_SELECT)
