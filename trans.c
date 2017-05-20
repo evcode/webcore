@@ -137,9 +137,9 @@ int opensock(TRANS_TYPE type, Transaction* trans)
 	by a system (mini?default, WIN=1120 on my Ubuntu) value,
 	such as: cat /proc/sys/net/ipv4/tcp_*mem ??? */
 	int optvalue = 1000;
-	setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &optvalue, sizeof(optvalue));
+	//setsockopt(fd, SOL_SOCKET, SO_SNDBUF, &optvalue, sizeof(optvalue));
 	optvalue = 500;
-	setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &optvalue, sizeof(optvalue));
+	//setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &optvalue, sizeof(optvalue));
 	// NOTE: here buff means the local fd - how about the conn_fd from remote:
 	//       they're same!! refer to acceptsock() - at least on Ubuntu
 	optvalue = 1; // NOTE: fix "address in use" due to TIME_WAIT
@@ -692,9 +692,7 @@ Transaction* trans_create(int mode, char* dst)
 
 void trans_destory(Transaction* p)
 {
-	closesock(p);
-
-	free(p);
+	closesock(p); // closed and freed all resources
 }
 
 // *******************************************************************

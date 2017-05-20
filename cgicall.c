@@ -1,4 +1,5 @@
 #include "cgicall.h"
+#include "taskpool.h"
 
 static CGI_StatusCode http_statuslist[] =
 {
@@ -429,7 +430,11 @@ void cgi_request(const char* msg, int msglen)
 	// run cgi
 	if (envlist[0] != NULL) // 1st one is NULL, means no env variant
 	{
+#ifdef ENABLE_TASKPOOL
+		taskpool_request(NULL, cgi_run, envlist);
+#else
 		cgi_run(envlist); // TODO: now it directly cb "respond", so still "syn" call! Improve!!
+#endif
 	}
 	else
 	{

@@ -4,6 +4,8 @@
 
 #include "trans.h"
 #include "util.h"
+#include "taskpool.h"
+
 extern void on_trans_notified(TransEvent, TransConn*, char*, unsigned int);
 
 static int system_le()
@@ -73,7 +75,11 @@ int main (int argc, char* argv[], char* envp[])
 		printf("%s ", envp[i]);
 	printf("\n\n");
 
-	install_signals();
+	// TODO: bug fixing - ENABLE_TASKPOOL: signal cannot work well with multi-threads:(
+	//install_signals();
+#ifdef ENABLE_TASKPOOL
+	taskpool_create(10);
+#endif
 
 	char * dst = "ANY";//"192.168.100.218:3000" "ANY" // TODO: read from cmdline
 

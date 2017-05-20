@@ -1,6 +1,7 @@
 
 #TRANS_IO?=IO_SELECT
 TRANS_IO?=IO_EPOLL
+TASKPOOL?=1
 
 DEBUG_ENVLIST?=0
 
@@ -42,6 +43,10 @@ else
 # it's EXCLUDE!!!
 EXCLUDES=trans_epoll.c trans_io.c trans_io_impl.c
 endif
+
+ifeq ($(TASKPOOL),1)
+CFLAGS += -DENABLE_TASKPOOL
+endif 
 
 ifeq ($(DEBUG_ENVLIST),1)
 CFLAGS += -DDEBUG_ENVLIST
