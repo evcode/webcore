@@ -121,7 +121,7 @@ void on_cgi_notified(int fd, int err, char* s, int n) // "s" is the Content info
 		error("Failed to send, err=%d\n", len); // TODO: in case failure turn to another HTTP error sent?!!
 		say_errno();
 	}
-	debug("pid=%d Server responds %d bytes>>\n", getpid(), len);
+	debug("pid=%d Server responds %d bytes on fd %d>>\n", getpid(), len, fd);
 
 	free(httpbuff);
 }

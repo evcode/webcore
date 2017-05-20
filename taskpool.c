@@ -172,18 +172,17 @@ static BOOL _pop_worker_queue(TaskWorker* work)
 		instance.worker_queue = pop->next_worker;
 		instance.worker_count --;
 		debug("@--< one pop from worker-queue..., and %d tasks remained\n", instance.worker_count);
+	}
+    pthread_mutex_unlock(&instance.queue_mutex);
 
-		//
+    if (pop != NULL)
+    {
 		memcpy(work, pop, sizeof(TaskWorker));
-
+        
 		free(pop);
 		pop = NULL;
-
-		pthread_mutex_unlock(&instance.queue_mutex);
 		return TRUE;
-	}
-
-	pthread_mutex_unlock(&instance.queue_mutex);
+    }
 	return FALSE;
 }
 
@@ -199,7 +198,7 @@ static void _taskpool_routine(TaskProcess* task)
 		}
 		else
 		{
-			sleep(1); // TODO: for debug only- the busy-waiting here
+			usleep(300*1000); // TODO: for debug only- the busy-waiting here
 		}
 
 #if 0
@@ -253,6 +252,9 @@ static BOOL _create_taskproecss(TaskProcess *task)
 TaskPoolHandle taskpool_create(int initcount)
 {
 	memset(&instance, 0, sizeof(TaskPool));
+    
+	// waiting queue
+	pthread_mutex_init(&instance.queue_mutex, NULL);
 
 	// thread pool
 	int i;
@@ -261,9 +263,6 @@ TaskPoolHandle taskpool_create(int initcount)
 		_create_taskproecss(&instance.task_list[i]);
 	}
 	instance.task_count = i;
-
-	// waiting queue
-	pthread_mutex_init(&instance.queue_mutex, NULL);
 
 	return &instance;
 }
