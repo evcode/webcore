@@ -43,8 +43,8 @@ static BOOL _process_trans_io(int32 fd, TRANS_IO_EVENT evt)
 					transact(p);
 					
 					// remove the conn for select
-					// TODO: bug fixing - ENABLE_TASKPOOL: cannot adapt to the asyn (multi-threads) handling of CGI
 					//closeconn(curr_trans, p);
+					// TODO: bug fixing - ENABLE_TASKPOOL: cannot adapt to the asyn (multi-threads) handling of CGI
 				}
 			}
 		break;

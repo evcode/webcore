@@ -146,6 +146,9 @@ int opensock(TRANS_TYPE type, Transaction* trans)
 	setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &optvalue, sizeof(optvalue));
 	optvalue = 1;
 	setsockopt(fd, IPPROTO_IP, TCP_NODELAY, &optvalue, sizeof(optvalue));
+	optvalue = 5000; // 5 sec send/recv TO
+	//setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &optvalue, sizeof(optvalue));
+	//setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &optvalue, sizeof(optvalue));
 
 	debug("Open the trans=%d\n", fd);
 	dumpsock(fd);
@@ -155,6 +158,7 @@ int opensock(TRANS_TYPE type, Transaction* trans)
 	trans->trans_type   = type;
 	trans->backlog      = 5;
 	trans->trans_fd     = fd;
+	pthread_mutex_init(&trans->conn_mutex, NULL);
 
 	return 0;
 }
@@ -240,9 +244,11 @@ TransConn* acceptsock(Transaction* trans)
 	TransConn* conn = (TransConn*)malloc(sizeof(TransConn));
 	memset(conn, 0, sizeof(TransConn));
 	conn->conn_fd = cli_fd;
+	conn->parent = trans;
 	memcpy(&conn->conn_addr, &sockaddr, socklen);
 	conn->conn_len = socklen;
 	//
+	pthread_mutex_lock(&trans->conn_mutex, NULL);
 	if (trans->conn_start == NULL)
 	{
 		trans->conn_start = conn;
@@ -256,6 +262,7 @@ TransConn* acceptsock(Transaction* trans)
 	trans->conn_nbr ++;
 
 	trans_dump(trans); // Debug to dump after added
+	pthread_mutex_unlock(&trans->conn_mutex, NULL);
 
 	return trans->conn_end;
 }
@@ -331,6 +338,7 @@ void closeconn(Transaction* trans, TransConn* conn) // TOOD: double check codes 
 		return;
 	}
 
+	pthread_mutex_lock(&trans->conn_mutex, NULL);
 	if (trans->conn_start == conn) // if 1st one to remove
 	{
 		trans->conn_nbr --;
@@ -342,6 +350,8 @@ void closeconn(Transaction* trans, TransConn* conn) // TOOD: double check codes 
 		conn = NULL;
 
 		trans_dump(trans); // Debug to dump after removed
+		pthread_mutex_unlock(&trans->conn_mutex, NULL);
+
 		return;
 	}
 
@@ -363,6 +373,8 @@ void closeconn(Transaction* trans, TransConn* conn) // TOOD: double check codes 
 			conn = NULL;
 
 			trans_dump(trans); // Debug to dump after removed
+			pthread_mutex_unlock(&trans->conn_mutex, NULL);
+
 			return;
 		}
 
@@ -370,6 +382,7 @@ void closeconn(Transaction* trans, TransConn* conn) // TOOD: double check codes 
 	}
 
 	debug("Warning: No connection closed\n");
+	pthread_mutex_unlock(&trans->conn_mutex, NULL);
 }
 
 TransConn* trans_find(Transaction* trans, uint32 fd)
@@ -388,7 +401,7 @@ TransConn* trans_find(Transaction* trans, uint32 fd)
 	return NULL;
 }
 
-void trans_dump(Transaction* trans)
+void trans_dump(Transaction* trans) // NOTE: attention thread-safety
 {
 	if (trans == NULL)
 		error("Invalid Trans to dump\n");
@@ -398,6 +411,7 @@ void trans_dump(Transaction* trans)
 	printf("----------------------------------\n");
 	int cnt = 0;
 	struct sockaddr_in *in;
+
 	TransConn* conn = trans->conn_start;
 	while (conn != NULL)
 	{
@@ -417,7 +431,7 @@ char* trans_get_eventname(TransEvent evt)
 {
 	switch(evt)
 	{
-		case TransEvent_NEWCONNECTION:
+		case TransEvent_NEW_CONNECTION:
 			return "NEW CONNECTION";
 		break;
 		case TransEvent_REQUEST_TIMEOUT:

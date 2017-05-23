@@ -170,3 +170,39 @@ void sig_routine(int signum)
 
 	exit(0); // TODO: remove it
 }
+
+void debugger_dump(int signo)
+{
+	printf("################################################\n");
+	printf("\t SIGSEGV captured...go to start Debugger\n");
+	printf("################################################\n");
+
+#ifdef MACOS
+	// TODO: any ways to debug???
+#else
+	char buf[1024];
+	char cmd[1024];
+	FILE *fh;
+
+	snprintf(buf, sizeof(buf), "/proc/%d/cmdline", getpid());
+
+	if(!(fh = fopen(buf, "r")))
+		exit(0);
+	if(!fgets(buf, sizeof(buf), fh))
+		exit(0);
+	fclose(fh);
+
+	if(buf[strlen(buf) - 1] == '\n')
+		buf[strlen(buf) - 1] = '\0';
+	snprintf(cmd, sizeof(cmd), "gdb %s %d", buf, getpid());
+
+	system(cmd);
+#endif
+
+	exit(0);
+}
+
+void debugger_enable()
+{
+	signal(SIGSEGV, debugger_dump);
+}

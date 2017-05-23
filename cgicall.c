@@ -1,4 +1,5 @@
 #include "cgicall.h"
+#include "envlist.h"
 #include "taskpool.h"
 
 static CGI_StatusCode http_statuslist[] =
@@ -47,7 +48,7 @@ static CGI_StatusCode http_statuslist[] =
 	{507, "Insufficient Storage", ""}
 };
 
-CGI_StatusCode cgi_get_statuscode(int err)
+CGI_StatusCode cgi_map_httpstatus(int err)
 {
 	int sta;
 
@@ -123,19 +124,92 @@ char* cgi_get_notifyname(int evt)
 	return "<unknown cgi event>";
 }
 
-static int response_id = -1;
-static void (*response_cb)(int, int, char*, int) = NULL;
+static CgiListenerList listenlist;
 
-/* @"msg": as http/non-http data read from cgi to send to browser
-*/
-void cgi_addlisten(int id, void(*cb)(int id, int err, char* msg, int len))
+static void _cgilisten_init()
 {
-	response_id = id;
-	response_cb = cb;
+	static BOOL is = FALSE;
 
-	//fflush(stdout); // TODO: maybe added in cgi program??? NO NEED HERE
+	if (!is)
+	{
+		memset(&listenlist, 0, sizeof(CgiListenerList));
+
+		pthread_mutex_init(&listenlist.list_mutex, NULL);
+		is = TRUE;
+	}
 }
 
+CgiListener* cgi_addlisten(void* id, CgiListen_CB cb)
+{
+	CgiListener* l = malloc(sizeof(CgiListener));
+	memset(l, 0, sizeof(CgiListener));
+	l->listen_id = id;
+	l->listen_cb = cb;
+
+	//
+	pthread_mutex_lock(&listenlist.list_mutex);
+	_cgilisten_init();
+
+	if (listenlist.list == NULL)
+		listenlist.list = l;
+	else
+	{
+		CgiListener* curr = listenlist.list;
+		while (curr->next_listen != NULL) // TODO: it's O(n) to find tail:(
+		{
+			curr = curr->next_listen;
+		}
+		curr->next_listen = l;
+	}
+
+	listenlist.list_num ++;
+	pthread_mutex_unlock(&listenlist.list_mutex);
+
+	return l;
+}
+
+void cgi_rmlisten(CgiListener* l)
+{
+	pthread_mutex_lock(&listenlist.list_mutex);
+	if (listenlist.list == l)
+	{
+		listenlist.list = l->next_listen;
+		listenlist.list_num --;
+
+		free(l);
+		l = NULL;
+	}
+	else
+	{
+		CgiListener* curr = listenlist.list;
+		while (curr->next_listen != NULL) // TODO: it's O(n) to find tail:(
+		{
+			if (curr->next_listen == l)
+			{
+				curr->next_listen = l->next_listen;
+				listenlist.list_num --;
+
+				free(l);
+				l = NULL;
+			}
+
+			curr = curr->next_listen;
+		}
+	}
+	pthread_mutex_unlock(&listenlist.list_mutex);
+}
+
+static void _cgilisten_cb(CgiListener* l, int evt, char* msg, int len) // TODO: if cb inside is BLOCKING, efficiency is low!! Improve
+{
+	if ((l == NULL) ||
+		(l->listen_id == NULL) || (l->listen_cb == NULL))
+		return;
+
+	l->listen_cb(l->listen_id, evt, msg, len);
+
+	// TODO: remove "l" here???
+	cgi_rmlisten(l);
+}
 /*
        #include <unistd.h>
        int pipe(int pipefd[2]);
@@ -179,15 +253,23 @@ typedef union
 	} pair;
 } PipeDesc;
 
-void cgi_run(char* envp[])
+static void _run_cgi(CgiListener* l)
 {
-	int tocgi[2]; // server channels to cgi
-	int fromcgi[2]; // cgi channels to server
+	// Get envs
+	Envlist elist;
+	Envlist* envlist = l->metadata;
+	memcpy(&elist, envlist, sizeof(Envlist));
+	envlist_uninit(envlist); // release the envlist
+
+	char** envp = elist.envs;
 
     /* Create the full-duplex pipes (now "fromcgi" only should be enough):
     miniweb (w tocgi[1])------------->>(r tocgi[0])   cgi
     miniweb (r fromcgi[0])<<-----------(w fromcgi[1]) cgi
     */
+	int tocgi[2]; // server channels to cgi
+	int fromcgi[2]; // cgi channels to server
+
 	int from_fd = pipe(fromcgi);//pipe2(fromcgi, O_NONBLOCK);// now MACOS has no pipe2, replace to use fcntl
 	if (from_fd < 0)
 	{
@@ -220,7 +302,7 @@ void cgi_run(char* envp[])
 		return;
 	}
 
-	// TODO handle cgi_runn() error before fork to respond HTTP
+	// TODO handle cgi_run() error before fork to respond HTTP
 
 	if (newpid == 0) // child: cgi execution
 	{
@@ -259,7 +341,7 @@ void cgi_run(char* envp[])
 	}
 	else // parent: pipe receive
 	{
-		debug("Forked the process %d\n", newpid);
+		debug("CGI forked the process %d\n", newpid);
 
 		/*
 			no need Write in Parent
@@ -319,10 +401,10 @@ void cgi_run(char* envp[])
 		close(fromcgi[0]);
 
 		printf("\n"); // end of "." above
-		debug("Totally %d bytes (to=%d left) received from cgi\n", totaloff, to);
+		debug("CGI totally %d bytes (to=%d left) received from cgi\n", totaloff, to);
 
 		// reading done, and respond it
-		if (response_cb)
+		//if (response_cb)
 		{
 			char* desc;
 
@@ -331,7 +413,7 @@ void cgi_run(char* envp[])
 			if (to == 0)
 			{
 				desc = "Timeout to wait CGI responding";
-				response_cb(response_id, CGI_NOTIFY_TIMEOUT, desc, strlen(desc));
+				_cgilisten_cb(l, CGI_NOTIFY_TIMEOUT, desc, strlen(desc));
 			}
 			else if (totaloff > 0) // NOTE: here cannot handle "totaloff" is negative!!!!!
 			{
@@ -359,22 +441,22 @@ void cgi_run(char* envp[])
 							break;
 
 						success = 1;
-						response_cb(response_id, err_str, substr2, totaloff-(substr2-totalread));
+						_cgilisten_cb(l, err_str, substr2, totaloff-(substr2-totalread));
 					} while (0);
 
 					if (!success)
 					{
 						desc = "Not identified CGI error";
-						response_cb(response_id, CGI_NOTIFY_CGI_ERR, desc, strlen(desc));
+						_cgilisten_cb(l, CGI_NOTIFY_CGI_ERR, desc, strlen(desc));
 					}
 				}
 				else
-					response_cb(response_id, CGI_NOTIFY_OK, totalread, totaloff); // TODO: if cb inside is BLOCKING, efficiency is low!! Improve
+					_cgilisten_cb(l, CGI_NOTIFY_OK, totalread, totaloff);
 			}
 			else if (totaloff == 0)
 			{
 				desc = "Invalid data retrieved from CGI";
-				response_cb(response_id, CGI_NOTIFY_INVALID_DATA, desc, strlen(desc));
+				_cgilisten_cb(l, CGI_NOTIFY_INVALID_DATA, desc, strlen(desc));
 			}
 		}
 
@@ -386,14 +468,28 @@ void cgi_run(char* envp[])
 	debug("-------------------- cgi completed!!\n\n");
 }
 
-extern char** envlist_init(); // NOTE: (on MACOS??) MANDATORY;otherwise, it will crash when to read it here. WHY????????????
+/* Take it for example of the param "msg":
+GET / HTTP/1.1
+Host: 127.0.0.1:9000
+Connection: keep-alive
+Cache-Control: max-age=0
+Upgrade-Insecure-Requests: 1
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_4) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp;q=0.8
+DNT: 1
+Accept-Encoding: gzip, deflate, sdch, br
+Accept-Language: zh-CN,zh;q=0.8
+Cookie: _ga=GA1.1.1160035858.1493825013
 
-void cgi_request(const char* msg, int msglen)
+Then, translate each of lines one by one, and add into a env. variables list
+*/
+void cgi_request(CgiListener* l, const char* msg, int msglen)
 {
 	int i;
 
+	debug("Do request CGI:\n");
 	// construct env. variant retrieved from "msg"
-	char** envlist = envlist_init();
+	Envlist* envlist = envlist_init();
 
 	int envstart = 0;
 	for (i = 0; i < msglen; i++) // Parse the line one by one
@@ -407,14 +503,12 @@ void cgi_request(const char* msg, int msglen)
 				memcpy(envstr, msg + envstart, envlen);
 				envstr[envlen] = '\0';
 
-				CGI_NOTIFY notify = envlist_add(envstr); // TODO: one more param for "envlist"
+				CGI_NOTIFY notify = envlist_add(envlist, envstr); // TODO: one more param for "envlist"
 				if (notify != CGI_NOTIFY_OK)
 				{
-					if (response_cb)
-						response_cb(response_id, notify, envstr, envlen);
+					_cgilisten_cb(l, notify, envstr, envlen);
 
 					free(envstr);
-
 					return; // release res to exit
 				}
 
@@ -425,23 +519,21 @@ void cgi_request(const char* msg, int msglen)
 		}
 	}
 
-	envlist_dump(envlist, envlist_num());
+	envlist_dump(envlist);
 
 	// run cgi
-	if (envlist[0] != NULL) // 1st one is NULL, means no env variant
+	if (envlist->envnum != 0) // 1st one is NULL, means no env variant
 	{
+		l->metadata = envlist; // TODO: UGLY design - to transmit the param into another task
 #ifdef ENABLE_TASKPOOL
-		taskpool_request(NULL, cgi_run, envlist);
+		taskpool_request(NULL, _run_cgi, l);
 #else
-		cgi_run(envlist); // TODO: now it directly cb "respond", so still "syn" call! Improve!!
+		_run_cgi(l); // TODO: now it directly cb "respond", so still "syn" call! Improve!!
 #endif
 	}
 	else
 	{
-		if (response_cb)
-		{
-			char* desc = "No environment variable found";
-			response_cb(response_id, CGI_NOTIFY_BAD_ENV, desc, strlen(desc));
-		}
+		char* desc = "No environment variable found";
+		_cgilisten_cb(l, CGI_NOTIFY_BAD_ENV, desc, strlen(desc));
 	}
 }

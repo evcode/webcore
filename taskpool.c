@@ -273,3 +273,25 @@ BOOL taskpool_request(TaskPoolHandle handle, void(*fn)(void*), void* arg)
 
 	return TRUE;
 }
+
+#if 1 // unit test
+static void do_task(int id)
+{
+	int cost = give_random(id);
+	debug("task %d starts...will cost %d sec\n", id, cost);
+	sleep(cost);
+	debug("task %d ends\n", id);
+}
+
+void test_taskpool(void)
+{
+	TaskPoolHandle pool = taskpool_create(5);
+	debug("Taskpool test will start in 2 sec...\n");
+	sleep(2);
+
+	for (int i = 10; i <=30; i ++)
+		taskpool_request(pool, do_task, (int)i);
+
+	while (1) {}
+}
+#endif

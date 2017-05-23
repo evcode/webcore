@@ -6,7 +6,7 @@
 #include "util.h"
 #include "taskpool.h"
 
-extern void on_trans_notified(TransEvent, TransConn*, char*, unsigned int);
+extern void on_trans_notified(TransEvent evt, TransConn* conn, char* s, unsigned int l);
 
 static int system_le()
 {
@@ -64,6 +64,13 @@ int main (int argc, char* argv[], char* envp[])
 	}
 #endif
 
+#if 0 // taskpool unit test
+	{
+		test_taskpool();
+		return 1;
+	}
+#endif
+
 	if (system_le())
 		debug("System Little-endian\n");
 
@@ -77,6 +84,7 @@ int main (int argc, char* argv[], char* envp[])
 
 	// TODO: bug fixing - ENABLE_TASKPOOL: signal cannot work well with multi-threads:(
 	//install_signals();
+	debugger_enable();
 #ifdef ENABLE_TASKPOOL
 	taskpool_create(10);
 #endif

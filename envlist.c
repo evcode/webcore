@@ -1,10 +1,8 @@
+#include "envlist.h"
 #include "util.h"
 
-#ifndef DEBUG_ENVLIST
-#undef debug(x...)
-
-#define debug(x...) do {} while (0)
-#endif
+#define HTTP_URL_LEN 256
+#define HTTP_LOCAL_PATH "../www"
 
 typedef struct
 {
@@ -12,7 +10,7 @@ typedef struct
 	char* env_name;
 } EnvMapping;
 
-EnvMapping cgi_envmapping[] = // mapping of HTTP fields NOT including Request-line
+static EnvMapping cgi_envmapping[] = // mapping of HTTP fields NOT including Request-line
 {
 	{"User-Agent",			"HTTP_USER_AGENT"},
 	{"Accept-Language",		"ACCEPT_LANGUAGE"},
@@ -30,14 +28,9 @@ EnvMapping cgi_envmapping[] = // mapping of HTTP fields NOT including Request-li
 
 static char* http_methods[] = {"GET", "POST", "PUT", "DELETE"};
 
-#define TRNAS_ENV_MAX 128
-
-static int envnum = 0;
-static char* envs[TRNAS_ENV_MAX];
-
-static BOOL addenv(const char* key, const char* value) // Combine 2 str as the format "<key>=<value>"
+static BOOL addenv(Envlist* l, const char* key, const char* value) // Combine 2 str as the format "<key>=<value>"
 {
-	if (envnum == TRNAS_ENV_MAX-1) // the last one is reserved to NULL as per CGI spec.???
+	if (l->envnum == TRNAS_ENV_MAX-1) // the last one is reserved to NULL as per CGI spec.???
 	{
 		error("ENV: reached the max number of environment variants!!\n");
 		return FALSE;
@@ -57,31 +50,29 @@ static BOOL addenv(const char* key, const char* value) // Combine 2 str as the f
 	memcpy(env+len1, value, len2);
 
 	// added one
-	envs[envnum] = env;
-	envnum ++;
+	l->envs[l->envnum] = env;
+	l->envnum ++;
 
 	debug("ENV: added env. variant [%s]\n", env);
 	return TRUE;
 }
 
-char** envlist_init() // It returns a string (char*) array
+// TODO: where to destory!!
+Envlist* envlist_init() // It returns a string (char*) array
 {
-	envnum = 0;
-	memset(envs, 0, sizeof(envs)); // NOTE: make sure last item is NULL
-	// TOOD: change to malloc: envs = malloc(TRNAS_ENV_MAX*sizeof(char*)); // the array has TRNAS_ENV_MAX datas of (char*) type
+	Envlist* envlist = malloc(sizeof(Envlist));
+	memset(envlist, 0, sizeof(Envlist)); // NOTE: make sure last item is NULL
 
-	return envs;
+	return envlist;
 }
 
-int envlist_num()
+void envlist_uninit(Envlist* envlist)
 {
-	return envnum;
+	free(envlist);
+	envlist = NULL;
 }
 
-#include "cgicall.h" // for notify error
-#define HTTP_URL_LEN 256
-#define HTTP_LOCAL_PATH "../www"
-CGI_NOTIFY envlist_add(const char* str)
+CGI_NOTIFY envlist_add(Envlist* l, const char* str)
 {
 	int i;
 
@@ -132,7 +123,7 @@ CGI_NOTIFY envlist_add(const char* str)
 					url[localpath_len+pathlen]='\0';
 					debug("Request URL(%d)=%s\n", pathlen, url);
 
-					addenv("PATH_INFO", url);
+					addenv(l, "PATH_INFO", url);
 
 					// TODO: http version
 				}
@@ -143,7 +134,7 @@ CGI_NOTIFY envlist_add(const char* str)
 				return CGI_NOTIFY_METHOD_NOT_SUPPORT;
 			}
 
-			addenv(k, v);
+			addenv(l, k, v);
 			return CGI_NOTIFY_OK;
 		}
 	}
@@ -170,7 +161,7 @@ CGI_NOTIFY envlist_add(const char* str)
 	{
 		int valstart = strlen(cgi_envmapping[i].http_field) + 2; // skip the following ':' and a space in a HTTP line
 		
-		addenv(env_name, &str[valstart]);
+		addenv(l, env_name, &str[valstart]);
 		return CGI_NOTIFY_OK;
 	}
 
@@ -179,8 +170,11 @@ CGI_NOTIFY envlist_add(const char* str)
 	return CGI_NOTIFY_OK;
 }
 
-void envlist_dump(char** e, int l)
+void envlist_dump(Envlist* list)
 {
+	char** e = list->envs;
+	int l    = list->envnum;
+
 	debug("----------------------------------\n");
 	debug("Environment variants:\n");
 	int i;

@@ -61,6 +61,8 @@ typedef struct transconn
 	struct sockaddr conn_addr; // TODO: now only IPv4
 	socklen_t conn_len;
 	struct transconn* nextconn;
+
+	void* parent; // it indicates Transaction attached
 } TransConn;
 
 typedef struct trans_struct
@@ -76,6 +78,7 @@ typedef struct trans_struct
 	int backlog; // max backlog for listen()
 
 	// remote-conn pool
+	pthread_mutex_t conn_mutex;
 	TransConn* conn_start; // that from Start to End maintains a Trans pool
 	TransConn* conn_end;
 	int conn_max; // allowed connected clients
@@ -84,7 +87,7 @@ typedef struct trans_struct
 
 typedef enum  // TODO: do edit "trans_get_eventname()" if update here!!
 {
-	TransEvent_NEWCONNECTION=0,
+	TransEvent_NEW_CONNECTION=0,
 	TransEvent_REQUEST_TIMEOUT,
 	TransEvent_RECEIVE_FAILURE,
 	TransEvent_OUT_OF_MEMORY,
@@ -101,5 +104,7 @@ TransConn* acceptsock(Transaction* trans);
 Transaction* trans_create(int mode, char* dst);
 TransConn* trans_find(Transaction* trans, unsigned int fd);
 void trans_dump(Transaction* trans);
+
+char* trans_get_eventname(TransEvent evt);
 
 #endif

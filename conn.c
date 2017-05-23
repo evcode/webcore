@@ -2,13 +2,12 @@
 #include "util.h"
 #include "cgicall.h"
 
-extern char* trans_get_eventname(TransEvent evt); // on MACOS, crash without it
-extern char* cgi_get_notifyname(int evt); // on MACOS, crash without it
-extern CGI_StatusCode cgi_get_statuscode(int err); // on MACOS compiling error: mandatory??????
-
-void on_cgi_notified(int fd, int err, char* s, int n) // "s" is the Content inform
+/*
+	@s: as http/non-http data read from cgi to send to browser
+*/
+static void on_cgi_notified(TransConn* conn, int err, char* s, int n) // "s" is the Content inform
 {
-	debug("On new CGI notified=%s(%d), %d bytes\n", cgi_get_notifyname(err), err, n);
+	debug("On new CGI notified on fd %d: evt=%s(%d), %d bytes\n", conn->conn_fd, cgi_get_notifyname(err), err, n);
 /*
 	int i;
 	for (i = 0; i < n; i ++)
@@ -32,7 +31,7 @@ void on_cgi_notified(int fd, int err, char* s, int n) // "s" is the Content info
 	// -----------------------------
 	// status-line
 	char* status_line[128];
-	CGI_StatusCode sta = cgi_get_statuscode(err);
+	CGI_StatusCode sta = cgi_map_httpstatus(err);
 	sprintf(status_line, "%s %d %s\r\n", "HTTP/1.1", sta.sta_code, sta.sta_name);
 	debug("Status-line:%s\n", status_line);
 	memcpy(httpbuff+httpoff, status_line, strlen(status_line)); // TODO: check out-of-range before copy
@@ -114,36 +113,20 @@ void on_cgi_notified(int fd, int err, char* s, int n) // "s" is the Content info
 	}
 
 	// -----------------------------
-	// Send Http-datagram
-	int len = send(fd, httpbuff, httpoff, 0); // TODO: flags
+	// Send HTTP datagram
+	int len = send(conn->conn_fd, httpbuff, httpoff, 0); // TODO: flags
 	if (len != httpoff)
 	{
 		error("Failed to send, err=%d\n", len); // TODO: in case failure turn to another HTTP error sent?!!
 		say_errno();
 	}
-	debug("pid=%d Server responds %d bytes on fd %d>>\n", getpid(), len, fd);
+	debug("pid=%d Server responds %d bytes on fd %d>>\n", getpid(), len, conn->conn_fd);
 
 	free(httpbuff);
-}
 
-void request_cgi(int fd, const char* msg, int msglen) // TODO: design a "listner" mechanism??? to notify, such as HTTP coming event
-{
-	debug("Do request CGI:\n");
-	if ((msg == NULL) || (msglen <= 0))
-	{
-		error("Bad parameters!!\n");
-		return;
-	}
-
-	int i;
-#if 0 // TEST the entire received bytes
-	for (i = 0; i < msglen; i++)
-		printf("%c", msg[i]);
-	printf("(end)\n");
-#endif
-
-	cgi_addlisten(fd, on_cgi_notified);
-	cgi_request(msg, msglen);
+	// TODO: i really want to put IO ops (send, recv, close) in main routine, not in another task like now!!
+	// Close the socket
+	closeconn(conn->parent, conn);
 }
 
 void on_trans_notified(TransEvent evt, TransConn* conn, char* s, unsigned int l)
@@ -153,7 +136,7 @@ void on_trans_notified(TransEvent evt, TransConn* conn, char* s, unsigned int l)
 		error("Invalid trans %x message(%d)\n", conn, evt);
 		return;
 	}
-	debug("On new Trans event=%s(%d), %d bytes\n", trans_get_eventname(evt), evt, l);
+	debug("On new Trans event on fd %d: evt=%s(%d), %d bytes\n", conn->conn_fd, trans_get_eventname(evt), evt, l);
 
 	switch (evt)
 	{
@@ -163,14 +146,25 @@ void on_trans_notified(TransEvent evt, TransConn* conn, char* s, unsigned int l)
 		// TODO: fix me
 		break;
 
-		case TransEvent_NEWCONNECTION:
+		case TransEvent_NEW_CONNECTION:
 		case TransEvent_INCOMING_MSG:
-		if ((s == NULL) || (l == 0)) // no actual data carried
-		{
-			return;
-		}
+			if ((s == NULL) || (l == 0)) // no actual data carried
+			{
+				return;
+			}
 
-		request_cgi(conn->conn_fd, s, l);  // TODO: i hate to directly give "fd" here. IMPROVE!!
+			int fd     = conn->conn_fd;
+			char* msg  = s;
+			int msglen = l;
+#if 0 // TEST the entire received bytes
+			int i;
+			for (i = 0; i < msglen; i++)
+				printf("%c", msg[i]);
+			printf("(end)\n");
+#endif
+
+			CgiListener* l = cgi_addlisten(conn, on_cgi_notified); // "conn" here as an ID in caller
+			cgi_request(l, msg, msglen);
 		break;
 
 		case TransEvent_ON_DISCONNECT: // just before its exit
