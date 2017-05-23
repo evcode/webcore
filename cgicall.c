@@ -146,21 +146,18 @@ CgiListener* cgi_addlisten(void* id, CgiListen_CB cb)
 	l->listen_id = id;
 	l->listen_cb = cb;
 
-	//
 	pthread_mutex_lock(&listenlist.list_mutex);
 	_cgilisten_init();
 
-	if (listenlist.list == NULL)
-		listenlist.list = l;
-	else
-	{
-		CgiListener* curr = listenlist.list;
-		while (curr->next_listen != NULL) // TODO: it's O(n) to find tail:(
-		{
-			curr = curr->next_listen;
-		}
-		curr->next_listen = l;
+    if (listenlist.list != NULL) // most-like()
+	{ // NOTE: since the insert order is no meaning, always add following after the Head
+        l->next_listen = listenlist.list->next_listen;
+        listenlist.list->next_listen = l;
 	}
+    else
+    {
+		listenlist.list = l;
+    }
 
 	listenlist.list_num ++;
 	pthread_mutex_unlock(&listenlist.list_mutex);
@@ -171,6 +168,12 @@ CgiListener* cgi_addlisten(void* id, CgiListen_CB cb)
 void cgi_rmlisten(CgiListener* l)
 {
 	pthread_mutex_lock(&listenlist.list_mutex);
+    if (listenlist.list == NULL)
+    {
+        error("CGI list is empty to remove\n");
+        return;
+    }
+
 	if (listenlist.list == l)
 	{
 		listenlist.list = l->next_listen;
@@ -191,6 +194,8 @@ void cgi_rmlisten(CgiListener* l)
 
 				free(l);
 				l = NULL;
+                
+                break;
 			}
 
 			curr = curr->next_listen;

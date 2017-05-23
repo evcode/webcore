@@ -217,6 +217,9 @@ void io_scan(int32 fd)
 		int cnt = epoll_wait(epoll_fd, epoll_evts, maxevents, timeout);
 		if (cnt < 0)
 		{
+            if (errno == EINTR)
+                continue;
+
 			error("Failure of epolling\n");
 			say_errno();
 			return;

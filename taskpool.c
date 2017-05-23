@@ -289,7 +289,8 @@ void test_taskpool(void)
 	debug("Taskpool test will start in 2 sec...\n");
 	sleep(2);
 
-	for (int i = 10; i <=30; i ++)
+    int i;
+	for (i = 10; i <=30; i ++)
 		taskpool_request(pool, do_task, (int)i);
 
 	while (1) {}
