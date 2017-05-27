@@ -1,6 +1,64 @@
 #include "cgicall.h"
 #include "envlist.h"
 #include "taskpool.h"
+#include "vheap.h"
+
+#define CGI_ERROR "CGI_ERROR"
+
+static int vheap_cgicall = 1; // TODO: a temp coding to get vheap id
+
+typedef struct mime_node
+{
+	const char *type;
+	const char *value;
+ } mime_node_t;
+
+ static mime_node_t tyhp_mime[] =
+ { // come from http://tool.oschina.net/commons
+	{".html", "text/html; charset=UTF-8"},
+	{".htm", "text/html; charset=UTF-8"},
+	{".jsp", "text/html; charset=UTF-8"},
+	{".asp", "text/asp"},
+	{".xml", "text/xml"},
+	{".txt", "text/plain"},
+	{".css", "text/css"},
+
+    {".png", "image/png"},
+    {".gif", "image/gif"},
+    {".jpg", "image/jpeg"},
+    {".jpeg", "image/jpeg"},
+    {".tif", "image/tiff"},
+    {".ico", "image/x-icon"},
+
+    {".js", "application/x-javascript"},
+    {".xhtml", "application/xhtml+xml"},
+    {".rtf", "application/rtf"},
+    {".pdf", "application/pdf"},
+    {".word", "application/msword"},
+    {".bmp", "application/x-bmp"},
+    {".img", "application/x-img"},
+
+    {".au", "audio/basic"},
+    {".mpeg", "video/mpeg"},
+    {".mpg", "video/mpeg"},
+    {".avi", "video/x-msvideo"},
+
+    {NULL, NULL}
+ };
+
+static char* get_contenttype(char *filename)
+{
+	int i;
+    char *postfix;
+    postfix = strrchr(filename, '.'); // get from last "."
+
+    for(i = 0; tyhp_mime[i].type != NULL; ++i)
+    {
+		if(strcasecmp(postfix, tyhp_mime[i].type) == 0)
+			return tyhp_mime[i].value;
+    }
+    return "text/plain; charset=UTF-8";
+}
 
 static CGI_StatusCode http_statuslist[] =
 {
@@ -141,7 +199,7 @@ static void _cgilisten_init()
 
 CgiListener* cgi_addlisten(void* id, CgiListen_CB cb)
 {
-	CgiListener* l = malloc(sizeof(CgiListener));
+	CgiListener* l = vheap_malloc(vheap_cgicall, sizeof(CgiListener));
 	memset(l, 0, sizeof(CgiListener));
 	l->listen_id = id;
 	l->listen_cb = cb;
@@ -179,20 +237,20 @@ void cgi_rmlisten(CgiListener* l)
 		listenlist.list = l->next_listen;
 		listenlist.list_num --;
 
-		free(l);
+		vheap_free(vheap_cgicall, l);
 		l = NULL;
 	}
 	else
 	{
 		CgiListener* curr = listenlist.list;
-		while (curr->next_listen != NULL) // TODO: it's O(n) to find tail:(
+		while (curr->next_listen != NULL)
 		{
 			if (curr->next_listen == l)
 			{
 				curr->next_listen = l->next_listen;
 				listenlist.list_num --;
 
-				free(l);
+				vheap_free(vheap_cgicall, l);
 				l = NULL;
                 
                 break;
@@ -203,6 +261,8 @@ void cgi_rmlisten(CgiListener* l)
 	}
 	pthread_mutex_unlock(&listenlist.list_mutex);
 }
+
+// TODO: "struct HttpResponse" construction
 
 static void _cgilisten_cb(CgiListener* l, int evt, char* msg, int len) // TODO: if cb inside is BLOCKING, efficiency is low!! Improve
 {
@@ -260,13 +320,7 @@ typedef union
 
 static void _run_cgi(CgiListener* l)
 {
-	// Get envs
-	Envlist elist;
 	Envlist* envlist = l->metadata;
-	memcpy(&elist, envlist, sizeof(Envlist));
-	envlist_uninit(envlist); // release the envlist
-
-	char** envp = elist.envs;
 
     /* Create the full-duplex pipes (now "fromcgi" only should be enough):
     miniweb (w tocgi[1])------------->>(r tocgi[0])   cgi
@@ -330,6 +384,9 @@ static void _run_cgi(CgiListener* l)
 			, except that's just your expectation
 		*/
 
+		// In Child: give envs to execute CGI program
+		char** envp = envlist->envs;
+
 		char* exec = "cgi/cgi";
 		char* argv[] = {"cgi", NULL}; // NOTE: on MACOS "argv" also must be NULL as tail
 		int exe = execve(exec, argv, envp);
@@ -353,8 +410,9 @@ static void _run_cgi(CgiListener* l)
 		*/
 		close(fromcgi[1]);
 
+		// receive the responding from CGI program
 		#define CGI_RESPONSE_LEN 256
-		char* totalread = malloc(CGI_RESPONSE_LEN);
+		char* totalread = vheap_malloc(vheap_cgicall, CGI_RESPONSE_LEN);
 		unsigned int totaloff = 0, n = 1, remaining;
 		int32 rlen; // FxCK! as "return" of read(), it must be "signed"!!!
 
@@ -388,7 +446,7 @@ static void _run_cgi(CgiListener* l)
 		while (0 == remaining)
 		{
 			n ++;
-			totalread = realloc(totalread, n*CGI_RESPONSE_LEN);
+			totalread = vheap_realloc(vheap_cgicall, totalread, n*CGI_RESPONSE_LEN);
 			//debug("realloc more=%d\n", n*CGI_RESPONSE_LEN);
 			printf(".");
 
@@ -465,13 +523,16 @@ static void _run_cgi(CgiListener* l)
 			}
 		}
 
-		free(totalread);
-
-		// TODO: waitpid??
+		vheap_free(vheap_cgicall, totalread);
 	}
+
+	//
+	envlist_uninit(envlist);
 
 	debug("-------------------- cgi completed!!\n\n");
 }
+
+// TODO: "struct HttpRequest" construction
 
 /* Take it for example of the param "msg":
 GET / HTTP/1.1
@@ -504,7 +565,7 @@ void cgi_request(CgiListener* l, const char* msg, int msglen)
 			int envlen = i - envstart; // not contains '\0'
 			if (envlen > 0) // to avoid that many '\r' or '\n' following together
 			{
-				char* envstr = malloc(envlen + 1); // TODO: any optimization can do here?? - not malloc always
+				char* envstr = vheap_malloc(vheap_cgicall, envlen + 1); // TODO: any optimization can do here?? - not malloc always
 				memcpy(envstr, msg + envstart, envlen);
 				envstr[envlen] = '\0';
 
@@ -513,17 +574,17 @@ void cgi_request(CgiListener* l, const char* msg, int msglen)
 				{
 					_cgilisten_cb(l, notify, envstr, envlen);
 
-					free(envstr);
+					vheap_free(vheap_cgicall, envstr);
+					envlist_uninit(envlist); // release the added env.
 					return; // release res to exit
 				}
 
-				free(envstr);
+				vheap_free(vheap_cgicall, envstr);
 			}
 
 			envstart = i + 1; // substring to parse starting from next byte
 		}
 	}
-
 	envlist_dump(envlist);
 
 	// run cgi
@@ -540,5 +601,7 @@ void cgi_request(CgiListener* l, const char* msg, int msglen)
 	{
 		char* desc = "No environment variable found";
 		_cgilisten_cb(l, CGI_NOTIFY_BAD_ENV, desc, strlen(desc));
+
+		envlist_uninit(envlist);
 	}
 }

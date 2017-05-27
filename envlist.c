@@ -1,8 +1,11 @@
 #include "envlist.h"
 #include "util.h"
+#include "vheap.h"
+
+static int vheap_env = 3; // TODO: a temp coding to get vheap id
 
 #define HTTP_URL_LEN 256
-#define HTTP_LOCAL_PATH "../www"
+#define HTTP_LOCAL_PATH "../www" // TODO: move into CGI program to remain less dependency!!
 
 typedef struct
 {
@@ -44,7 +47,7 @@ static BOOL addenv(Envlist* l, const char* key, const char* value) // Combine 2 
 		return FALSE;
 	}
 
-	char* env = malloc(len1+len2);
+	char* env = vheap_malloc(vheap_env, len1+len2);
 	memcpy(env, key, len1);
 	env[len1-1]='='; // replace '/0' at end of "key"
 	memcpy(env+len1, value, len2);
@@ -60,7 +63,7 @@ static BOOL addenv(Envlist* l, const char* key, const char* value) // Combine 2 
 // TODO: where to destory!!
 Envlist* envlist_init() // It returns a string (char*) array
 {
-	Envlist* envlist = malloc(sizeof(Envlist));
+	Envlist* envlist = vheap_malloc(vheap_env, sizeof(Envlist));
 	memset(envlist, 0, sizeof(Envlist)); // NOTE: make sure last item is NULL
 
 	return envlist;
@@ -68,7 +71,17 @@ Envlist* envlist_init() // It returns a string (char*) array
 
 void envlist_uninit(Envlist* envlist)
 {
-	free(envlist);
+	debug("ENV: unint the envlist, which had %d envs\n", envlist->envnum);
+
+	// release all env. variables in the list
+	int i;
+	for (i = 0; i < envlist->envnum; i ++)
+	{
+		vheap_free(vheap_env, envlist->envs[i]);
+	}
+
+	// release the envlist object
+	vheap_free(vheap_env, envlist);
 	envlist = NULL;
 }
 

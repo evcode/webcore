@@ -5,6 +5,7 @@
 #include "trans.h"
 #include "util.h"
 #include "taskpool.h"
+#include "vheap.h"
 
 extern void on_trans_notified(TransEvent evt, TransConn* conn, char* s, unsigned int l);
 
@@ -85,6 +86,8 @@ int main (int argc, char* argv[], char* envp[])
 	// TODO: bug fixing - ENABLE_TASKPOOL: signal cannot work well with multi-threads:(
 	//install_signals();
 	debugger_enable();
+
+	vheap_init(1);
 #ifdef ENABLE_TASKPOOL
 	taskpool_create(10);
 #endif

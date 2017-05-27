@@ -1,4 +1,7 @@
 #include "trans_io.h"
+#include "vheap.h"
+
+static int vheap_transio = 6; // TODO: a temp coding to get vheap id
 
 /*
 SYNOPSIS
@@ -188,7 +191,7 @@ void io_scan(int32 fd)
 	io_fdlen = sizeof(fd_set)*8;
 	debug("+ IO fd_set length has %d BITs\n", io_fdlen);
 	if (io_fds == NULL)
-		io_fds = malloc(io_fdlen);
+		io_fds = vheap_malloc(vheap_transio, io_fdlen);
 	memset(io_fds, INVALID_FD, io_fdlen); // mandatory init - all "-1"
 
 	io_add(fd);

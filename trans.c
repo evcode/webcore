@@ -2,6 +2,9 @@
 
 #include "trans.h"
 #include "util.h"
+#include "vheap.h"
+
+static int vheap_trans = 5; // TODO: a temp coding to get vheap id
 
 int format_sockaddr(int type, const char* str, struct sockaddr* s)
 {
@@ -241,30 +244,29 @@ TransConn* acceptsock(Transaction* trans)
 	//dumpsock(cli_fd);
 
 	// Add the new client to the connection pool
-	TransConn* conn = (TransConn*)malloc(sizeof(TransConn));
+	TransConn* conn = (TransConn*)vheap_malloc(vheap_trans, sizeof(TransConn));
 	memset(conn, 0, sizeof(TransConn));
 	conn->conn_fd = cli_fd;
 	conn->parent = trans;
 	memcpy(&conn->conn_addr, &sockaddr, socklen);
 	conn->conn_len = socklen;
 	//
-	pthread_mutex_lock(&trans->conn_mutex, NULL);
+	pthread_mutex_lock(&trans->conn_mutex);
 	if (trans->conn_start == NULL)
 	{
 		trans->conn_start = conn;
 	}
 	else
-	{
-		trans->conn_end->nextconn = conn;
+	{// NOTE: since the insert order is no meaning, always add following after the Head
+		conn->nextconn = trans->conn_start->nextconn;
+		trans->conn_start->nextconn = conn;
 	}
-	trans->conn_end = conn;
-	//
 	trans->conn_nbr ++;
 
 	trans_dump(trans); // Debug to dump after added
-	pthread_mutex_unlock(&trans->conn_mutex, NULL);
+	pthread_mutex_unlock(&trans->conn_mutex);
 
-	return trans->conn_end;
+	return conn;
 }
 
 int connectsock(Transaction* trans, const char* str)
@@ -313,18 +315,17 @@ void closesock(Transaction* trans)
 		//
 		TransConn* tmp = p;
 		p = p->nextconn;
-		free(tmp);
+		vheap_free(vheap_trans, tmp);
 		tmp = NULL;
 	}
 
 	trans->conn_start = NULL;
-	trans->conn_end = NULL;
 	trans->conn_nbr = 0;
 
 	// close server
 	close(trans->trans_fd);
 	//
-	free(trans);
+	vheap_free(vheap_trans, trans);
 	trans = NULL;
 }
 
@@ -338,7 +339,7 @@ void closeconn(Transaction* trans, TransConn* conn) // TOOD: double check codes 
 		return;
 	}
 
-	pthread_mutex_lock(&trans->conn_mutex, NULL);
+	pthread_mutex_lock(&trans->conn_mutex);
 	if (trans->conn_start == conn) // if 1st one to remove
 	{
 		trans->conn_nbr --;
@@ -346,43 +347,35 @@ void closeconn(Transaction* trans, TransConn* conn) // TOOD: double check codes 
 		close(conn->conn_fd); // TODO: shutdown()??
 		// remove from conn-pool and release
 		trans->conn_start = conn->nextconn;
-		free(conn);
+		vheap_free(vheap_trans, conn);
 		conn = NULL;
 
 		trans_dump(trans); // Debug to dump after removed
-		pthread_mutex_unlock(&trans->conn_mutex, NULL);
-
-		return;
 	}
-
-	TransConn* p = trans->conn_start;
-	while (p->nextconn != NULL)
+	else
 	{
-		if (p->nextconn == conn)
+		TransConn* p = trans->conn_start;
+		while (p->nextconn != NULL)
 		{
-			trans->conn_nbr --;
-			// close fd
-			close(conn->conn_fd); // TODO: shutdown()??
-			// remove from conn-pool and release
-			if (trans->conn_end == conn) // if last one to remove
+			if (p->nextconn == conn)
 			{
-				trans->conn_end = p;
+				trans->conn_nbr --;
+				// close fd
+				close(conn->conn_fd); // TODO: shutdown()??
+				// remove from conn-pool and release
+				p->nextconn = conn->nextconn;
+				vheap_free(vheap_trans, conn);
+				conn = NULL;
+
+				trans_dump(trans); // Debug to dump after removed
+
+				break;
 			}
-			p->nextconn = conn->nextconn;
-			free(conn);
-			conn = NULL;
 
-			trans_dump(trans); // Debug to dump after removed
-			pthread_mutex_unlock(&trans->conn_mutex, NULL);
-
-			return;
+			p = p->nextconn;
 		}
-
-		p = p->nextconn;
 	}
-
-	debug("Warning: No connection closed\n");
-	pthread_mutex_unlock(&trans->conn_mutex, NULL);
+	pthread_mutex_unlock(&trans->conn_mutex);
 }
 
 TransConn* trans_find(Transaction* trans, uint32 fd)
@@ -424,6 +417,10 @@ void trans_dump(Transaction* trans) // NOTE: attention thread-safety
 
 	if (trans->conn_nbr != cnt)
 		error("Dismatched connection count (%d!=%d)\n", trans->conn_nbr,cnt);
+
+	// TODO: a temp chance to dump vheap
+	if (trans->conn_nbr == 0)
+		vheap_dump(0);
 }
 
 // *******************************************************************
@@ -698,7 +695,7 @@ Transaction* trans_create(int mode, char* dst)
 	}
 
 	//
-	Transaction* ptrans = malloc(sizeof(Transaction));
+	Transaction* ptrans = vheap_malloc(vheap_trans, sizeof(Transaction));
 	memcpy(ptrans, &trans, sizeof(Transaction));
 
 	return ptrans;

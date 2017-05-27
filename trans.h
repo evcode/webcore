@@ -80,7 +80,6 @@ typedef struct trans_struct
 	// remote-conn pool
 	pthread_mutex_t conn_mutex;
 	TransConn* conn_start; // that from Start to End maintains a Trans pool
-	TransConn* conn_end;
 	int conn_max; // allowed connected clients
 	int conn_nbr; // connected clients count
 } Transaction;

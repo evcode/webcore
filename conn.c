@@ -1,6 +1,9 @@
 #include "trans.h"
 #include "util.h"
 #include "cgicall.h"
+#include "vheap.h"
+
+static int vheap_conn = 2; // TODO: a temp coding to get vheap id
 
 /*
 	@s: as http/non-http data read from cgi to send to browser
@@ -20,7 +23,7 @@ static void on_cgi_notified(TransConn* conn, int err, char* s, int n) // "s" is 
 	unsigned int httpoff = 0;
 
 	httplen = n+1024; // 1024 reserved for http fields except "Content"
-	char* httpbuff = malloc(httplen);
+	char* httpbuff = vheap_malloc(vheap_conn, httplen);
 	if (httpbuff == NULL)
 	{
 		// TODO: generate "507"????
@@ -122,7 +125,7 @@ static void on_cgi_notified(TransConn* conn, int err, char* s, int n) // "s" is 
 	}
 	debug("pid=%d Server responds %d bytes on fd %d>>\n", getpid(), len, conn->conn_fd);
 
-	free(httpbuff);
+	vheap_free(vheap_conn, httpbuff);
 
 	// TODO: i really want to put IO ops (send, recv, close) in main routine, not in another task like now!!
 	// Close the socket
@@ -156,7 +159,7 @@ void on_trans_notified(TransEvent evt, TransConn* conn, char* s, unsigned int l)
 			int fd     = conn->conn_fd;
 			char* msg  = s;
 			int msglen = l;
-#if 0 // TEST the entire received bytes
+#if 0
 			int i;
 			for (i = 0; i < msglen; i++)
 				printf("%c", msg[i]);

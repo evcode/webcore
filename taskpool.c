@@ -1,4 +1,7 @@
 #include "taskpool.h"
+#include "vheap.h"
+
+static int vheap_taskpool = 4; // TODO: a temp coding to get vheap id
 
 /*
 SYNOPSIS
@@ -134,7 +137,7 @@ static TaskPool instance;
 */
 static void _push_worker_queue(void(*fn)(void*), void* arg)
 {
-	TaskWorker* worker = malloc(sizeof(TaskWorker));
+	TaskWorker* worker = vheap_malloc(vheap_taskpool, sizeof(TaskWorker));
 
 	memset(worker, 0 , sizeof(TaskWorker));
 	worker->w_routine = fn;
@@ -179,7 +182,7 @@ static BOOL _pop_worker_queue(TaskWorker* work)
     {
 		memcpy(work, pop, sizeof(TaskWorker));
         
-		free(pop);
+		vheap_free(vheap_taskpool, pop);
 		pop = NULL;
 		return TRUE;
     }

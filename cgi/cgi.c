@@ -6,7 +6,36 @@
 #include <unistd.h> // stdin/out fd
 #include <sys/stat.h>
 
-void cgierr(int err, char* desc)
+static int ishex(int x)
+{/* Copyright: http://rosettacode.org/wiki/URL_decoding#C */
+	return (x >= '0' && x <= '9') ||
+		(x >= 'a' && x <= 'f') ||
+		(x >= 'A' && x <= 'F');
+}
+
+static int url_decode(const char *s, char *dec)
+{/* Copyright: http://rosettacode.org/wiki/URL_decoding#C */
+	char *o;
+	const char *end = s + strlen(s);
+	int c;
+
+	for (o = dec; s <= end; o++)
+	{
+		c = *s++;
+		if (c == '+')
+			c = ' ';
+		else if (c == '%' && (!ishex(*s++) || !ishex(*s++) ||
+			!sscanf(s - 2, "%2x", &c)))
+			return -1;
+
+		if (dec)
+			*o = c;
+	}
+
+	return (o - dec);
+}
+
+static void cgierr(int err, char* desc)
 {
 	char cgistr[256]; // format: CGI_ERROR:<http status code>:<err description>"
 
@@ -14,7 +43,7 @@ void cgierr(int err, char* desc)
 	printf(cgistr);
 }
 
-char* cgi_envs[] = 
+static char* cgi_envs[] = 
 {
 	"REQUEST_METHOD",
 	"PATH_INFO",
@@ -64,6 +93,19 @@ int main(int argc, char* argv[])
 	}
 	else
 	{
+		// convert decoding of url: http://www.w3school.com.cn/tags/html_ref_urlencode.html
+		char cpath[256];
+		memset(cpath, 0, sizeof(cpath));
+
+		if (url_decode(path, cpath) < 0) // process the char starting with "%"
+		{
+			cgierr(400, "Invalid URL information");
+
+			return 1;
+		}
+		strcpy(path, cpath);
+
+		// retrieve the file
 		struct stat info;
 		stat(path, &info);
 		if (S_ISDIR(info.st_mode))
