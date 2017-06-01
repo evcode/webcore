@@ -71,6 +71,12 @@ Envlist* envlist_init() // It returns a string (char*) array
 
 void envlist_uninit(Envlist* envlist)
 {
+	if (envlist == NULL)
+	{
+		debug("Warning: a NULL envlist to release");
+		return;
+	}
+
 	debug("ENV: unint the envlist, which had %d envs\n", envlist->envnum);
 
 	// release all env. variables in the list
@@ -181,6 +187,26 @@ CGI_NOTIFY envlist_add(Envlist* l, const char* str)
 	// Here regard it as a Warning, return "OK"
 	debug("Warning: not identified <%s>\n", str);
 	return CGI_NOTIFY_OK;
+}
+
+char* envlist_getenv(Envlist* list, char* key)
+{
+	if (list == NULL)
+		return NULL;
+
+	char** e = list->envs;
+	int l    = list->envnum;
+
+	int i;
+	for (i = 0; i < l; i ++)
+	{
+		if (str_startwith(e[i], key))
+		{
+			return e[i]; // return "<key>=xxxxx"
+		}
+	}
+
+	return NULL;
 }
 
 void envlist_dump(Envlist* list)

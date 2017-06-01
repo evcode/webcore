@@ -36,6 +36,8 @@ typedef struct
 } Envlist;
 
 Envlist* envlist_init();
+void envlist_uninit(Envlist* envlist);
 CGI_NOTIFY envlist_add(Envlist* l, const char* str);
+char* envlist_getenv(Envlist* list, char* key);
 void envlist_dump(Envlist* list);
 #endif

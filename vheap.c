@@ -28,6 +28,8 @@ int vheap_init(int totalsize)
 void* vheap_malloc(int id, int size)
 {
 #if 1
+	assert(size>0);
+
 	void* mem = malloc(size);
 	assert(mem);
 
@@ -62,7 +64,12 @@ void* vheap_realloc(int id, void* src, int size)
 void vheap_free(int id, void* addr)
 {
 #if 1
-	assert(addr);
+	//assert(addr);
+	if (addr == NULL)
+	{
+		debug("Warning: a NULL vheap to release");
+		return;
+	}
 
 	free(addr);
 	addr = NULL;

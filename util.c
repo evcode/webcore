@@ -171,14 +171,29 @@ void sig_routine(int signum)
 	exit(0); // TODO: remove it
 }
 
+#include <execinfo.h>
+static void bt()
+{
+	void* callstack[128];
+	int i, frames = backtrace(callstack, 128);
+	char** strs = backtrace_symbols(callstack, frames);
+	for (i = 0; i < frames; ++i)
+	{
+		printf("%s\n", strs[i]);
+	}
+	free(strs);
+}
+
 void debugger_dump(int signo)
 {
 	printf("################################################\n");
 	printf("\t SIGSEGV captured...go to start Debugger\n");
 	printf("################################################\n");
 
+	bt();
+
 #ifdef MACOS
-	// TODO: any ways to debug???
+	// do nothing
 #else
 	char buf[1024];
 	char cmd[1024];

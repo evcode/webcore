@@ -8,8 +8,12 @@ static int vheap_conn = 2; // TODO: a temp coding to get vheap id
 /*
 	@s: as http/non-http data read from cgi to send to browser
 */
-static void on_cgi_notified(TransConn* conn, int err, char* s, int n) // "s" is the Content inform
+static void on_cgi_notified(TransConn* conn, CgiResponse* response) // "s" is the Content inform
 {
+	int err = response->cgi_errorcode;
+	char* s = response->cgi_msg;
+	int n   = response->cgi_msglen;
+
 	debug("On new CGI notified on fd %d: evt=%s(%d), %d bytes\n", conn->conn_fd, cgi_get_notifyname(err), err, n);
 /*
 	int i;
@@ -42,7 +46,16 @@ static void on_cgi_notified(TransConn* conn, int err, char* s, int n) // "s" is 
 
 	// -----------------------------
 	// respond-header
-	char* html_field="Server: miniweb\r\nContent-Type: text/html; charset=utf-8\r\n";
+	char* content_type = response->cgi_contenttype;
+	if (strlen(content_type) == 0)
+	{
+		error("Invalid Content-Type retrieved to response\n");
+
+		content_type = "text/html; charset=utf-8";
+	}
+	char* html_field[128];
+	//char* html_field="Server: miniweb\r\nContent-Type: text/html; charset=utf-8\r\n";
+	sprintf(html_field, "%s%s\r\n", "Server: miniweb\r\nContent-Type: ", content_type);
 	memcpy(httpbuff+httpoff, html_field, strlen(html_field)); // TODO: check out-of-range before copy
 	httpoff += strlen(html_field);
 

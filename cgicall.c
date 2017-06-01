@@ -4,6 +4,7 @@
 #include "vheap.h"
 
 #define CGI_ERROR "CGI_ERROR"
+#define CGI_RESPONSE_LEN 256
 
 static int vheap_cgicall = 1; // TODO: a temp coding to get vheap id
 
@@ -37,6 +38,7 @@ typedef struct mime_node
     {".word", "application/msword"},
     {".bmp", "application/x-bmp"},
     {".img", "application/x-img"},
+    {".json", "application/json"},
 
     {".au", "audio/basic"},
     {".mpeg", "video/mpeg"},
@@ -50,14 +52,24 @@ static char* get_contenttype(char *filename)
 {
 	int i;
     char *postfix;
+
+    if (filename == NULL)
+    	return NULL;
+
     postfix = strrchr(filename, '.'); // get from last "."
+    if (postfix == NULL)
+    	return NULL;
 
     for(i = 0; tyhp_mime[i].type != NULL; ++i)
     {
 		if(strcasecmp(postfix, tyhp_mime[i].type) == 0)
 			return tyhp_mime[i].value;
     }
-    return "text/plain; charset=UTF-8";
+
+	error("##################################################\n");
+    error("MIME not supported from url <%s>\n\n", filename);
+	error("##################################################\n");
+    return NULL;
 }
 
 static CGI_StatusCode http_statuslist[] =
@@ -182,7 +194,7 @@ char* cgi_get_notifyname(int evt)
 	return "<unknown cgi event>";
 }
 
-static CgiListenerList listenlist;
+static CgiListenerList listenlist; // TODO: more listenlist associated when cgi-init
 
 static void _cgilisten_init()
 {
@@ -223,6 +235,25 @@ CgiListener* cgi_addlisten(void* id, CgiListen_CB cb)
 	return l;
 }
 
+static void _free_listener(CgiListener* l)
+{
+	if (l->cgi_request) // TODO: not all listeners attaching a Request. See also "Construct CGI Request"
+	{
+		/* #################################
+			Destruct CGI Request
+		################################# */
+		debug("Destructed the CGI request from the listener %p\n", l);
+		envlist_uninit(l->cgi_request->cgi_envs);
+
+		vheap_free(vheap_cgicall, l->cgi_request);
+		l->cgi_request = NULL;
+	}
+
+	// free the listener
+	vheap_free(vheap_cgicall, l);
+	l = NULL;
+}
+
 void cgi_rmlisten(CgiListener* l)
 {
 	pthread_mutex_lock(&listenlist.list_mutex);
@@ -237,8 +268,7 @@ void cgi_rmlisten(CgiListener* l)
 		listenlist.list = l->next_listen;
 		listenlist.list_num --;
 
-		vheap_free(vheap_cgicall, l);
-		l = NULL;
+		_free_listener(l);
 	}
 	else
 	{
@@ -250,8 +280,7 @@ void cgi_rmlisten(CgiListener* l)
 				curr->next_listen = l->next_listen;
 				listenlist.list_num --;
 
-				vheap_free(vheap_cgicall, l);
-				l = NULL;
+				_free_listener(l);
                 
                 break;
 			}
@@ -259,6 +288,7 @@ void cgi_rmlisten(CgiListener* l)
 			curr = curr->next_listen;
 		}
 	}
+
 	pthread_mutex_unlock(&listenlist.list_mutex);
 }
 
@@ -270,11 +300,43 @@ static void _cgilisten_cb(CgiListener* l, int evt, char* msg, int len) // TODO: 
 		(l->listen_id == NULL) || (l->listen_cb == NULL))
 		return;
 
-	l->listen_cb(l->listen_id, evt, msg, len);
+	/* #########################################################
+		Construct CGI Response // NOTE it's on STACK!!!!! TODO
+	############################################################ */
+	CgiResponse cgi_response;
+
+	memset(&cgi_response, 0, sizeof(CgiResponse));
+	cgi_response.cgi_errorcode = evt;
+	cgi_response.cgi_msg       = msg;
+	cgi_response.cgi_msglen    = len;
+
+	// Get content-type from CgiRequest's Envlist and configure into CgiResponse
+	if ((l->cgi_request) &&
+		(l->cgi_request->cgi_envs))
+	{
+		char* url_env = envlist_getenv(l->cgi_request->cgi_envs, "PATH_INFO"); // url info while requesting
+		if (url_env)
+		{
+			char* contenttype = get_contenttype(url_env); // content-type identified from url
+			if (contenttype)
+			{
+				strcpy(cgi_response.cgi_contenttype, contenttype);
+				debug("Construct CgiResponse - content-type=%s\n", cgi_response.cgi_contenttype);
+			}
+		}
+		else
+		{
+			error("No PATH_INFO found from CgiRequest\n");
+		}
+	}
+
+	l->listen_cb(l->listen_id, &cgi_response);
 
 	// TODO: remove "l" here???
+	// TODO: memory leak below of "l" if not call _cgilisten_cb() or _run_cgi()
 	cgi_rmlisten(l);
 }
+
 /*
        #include <unistd.h>
        int pipe(int pipefd[2]);
@@ -320,7 +382,23 @@ typedef union
 
 static void _run_cgi(CgiListener* l)
 {
-	Envlist* envlist = l->metadata;
+	if (l == NULL)
+	{
+		error("Invalid CGI Listener\n");
+		return;
+	}
+	CgiRequest* req  = l->cgi_request;
+	if (req == NULL)
+	{
+		error("Invalid CGI Request\n");
+		return;
+	}
+	Envlist* envlist = req->cgi_envs;
+	if (envlist == NULL)
+	{
+		error("Invalid envlist in CGI Request\n");
+		return;
+	}
 
     /* Create the full-duplex pipes (now "fromcgi" only should be enough):
     miniweb (w tocgi[1])------------->>(r tocgi[0])   cgi
@@ -334,7 +412,7 @@ static void _run_cgi(CgiListener* l)
 	{
 		error("Failed to pipe!!\n");
 		say_errno();
-		return;
+		return; // TODO: memory leak of "l"
 	}
 
 	// Configure CGI pipe fds
@@ -358,7 +436,7 @@ static void _run_cgi(CgiListener* l)
 	{
 		error("Failed to fork!!\n");
 		say_errno();
-		return;
+		return; // TODO: memory leak of "l"
 	}
 
 	// TODO handle cgi_run() error before fork to respond HTTP
@@ -410,8 +488,8 @@ static void _run_cgi(CgiListener* l)
 		*/
 		close(fromcgi[1]);
 
+		// ------------------------------------
 		// receive the responding from CGI program
-		#define CGI_RESPONSE_LEN 256
 		char* totalread = vheap_malloc(vheap_cgicall, CGI_RESPONSE_LEN);
 		unsigned int totaloff = 0, n = 1, remaining;
 		int32 rlen; // FxCK! as "return" of read(), it must be "signed"!!!
@@ -466,11 +544,9 @@ static void _run_cgi(CgiListener* l)
 		printf("\n"); // end of "." above
 		debug("CGI totally %d bytes (to=%d left) received from cgi\n", totaloff, to);
 
+		// ------------------------------------
 		// reading done, and respond it
-		//if (response_cb)
-		{
 			char* desc;
-
 			// NOTE: Do judge TO firstly due to un"SIGNED" judge!!!!!
 			// : "totaloff" is uint32, which can just handle "rlen=-1" as > 0
 			if (to == 0)
@@ -521,18 +597,15 @@ static void _run_cgi(CgiListener* l)
 				desc = "Invalid data retrieved from CGI";
 				_cgilisten_cb(l, CGI_NOTIFY_INVALID_DATA, desc, strlen(desc));
 			}
-		}
 
-		vheap_free(vheap_cgicall, totalread);
-	}
-
-	//
-	envlist_uninit(envlist);
+			vheap_free(vheap_cgicall, totalread);
+	} // End of Parent pipe for read
 
 	debug("-------------------- cgi completed!!\n\n");
 }
 
 // TODO: "struct HttpRequest" construction
+// TODO: too many malloc memory - some to replace with array, espeically for env. variants
 
 /* Take it for example of the param "msg":
 GET / HTTP/1.1
@@ -590,7 +663,17 @@ void cgi_request(CgiListener* l, const char* msg, int msglen)
 	// run cgi
 	if (envlist->envnum != 0) // 1st one is NULL, means no env variant
 	{
-		l->metadata = envlist; // TODO: UGLY design - to transmit the param into another task
+		/* #################################
+			Construct CGI Request
+		################################# */
+		debug("Constructed a CGI request attach on the listener %p\n", l);
+		CgiRequest* req = vheap_malloc(vheap_cgicall, sizeof(CgiRequest));
+		memset(req, 0, sizeof(CgiRequest));
+		req->cgi_envs = envlist;
+
+		l->cgi_request = req; // Attach Request into a Listener
+
+		// Do CGI request...
 #ifdef ENABLE_TASKPOOL
 		taskpool_request(NULL, _run_cgi, l);
 #else
