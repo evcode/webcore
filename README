@@ -1,3 +1,13 @@
+TODO List:
+* thread-pool (now busy-waiting, to use cond_wait)
+* epoll (to support ET)
+* EAGAIN...errno handling
+* timing-cost measure on major procedure, such as connect, cgi...
+* [bug] "signal" not enable due to crash, so zombie exists now
+
+* non-blocking calling
+* memory pool
+* libevent
 
 /* --------------------------------------------------
 The core logical processing
@@ -63,13 +73,3 @@ The core logical processing
 
 -------------------------------------------------- */
 
-TODO List:
-* non-blocking calling
-* thread-pool
-* epoll
-* libevent
-
-* "close" and memory release
-* "waitpid"
-* EAGAIN...errno handling
-* memory alloc container
